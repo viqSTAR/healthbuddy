@@ -1,0 +1,16 @@
+{
+  "name": "@healthbuddy/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Design system, API client and auth shared by every Health Buddy app.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

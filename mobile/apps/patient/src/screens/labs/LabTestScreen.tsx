@@ -1,0 +1,178 @@
+import React, { useState, useMemo } from 'react';
+import { View, StyleSheet, Alert } from 'react-native';
+import {
+  Badge,
+  Button,
+  Card,
+  Chip,
+  ChipRow,
+  EmptyState,
+  ErrorState,
+  Icon,
+  Loading,
+  Screen,
+  SearchBar,
+  SectionHeader,
+  Text,
+  TopBar,
+  bookLabTest,
+  colors,
+  errorMessage,
+  fetchLabPackages,
+  radius,
+  spacing,
+  useAsync,
+} from '@healthbuddy/shared';
+import { PromoBanner } from '../../components/PromoBanner';
+
+const CATEGORIES = [
+  'Preventive Care',
+  'Cardiology',
+  'Endocrinology',
+  'General',
+  'Diabetology',
+  'Nutrition',
+  'Gastroenterology',
+];
+
+/** Mirrors `lab_test_dashboard` / `book_lab_test`. */
+export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const [category, setCategory] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [bookingId, setBookingId] = useState<string | null>(null);
+
+  const { data, loading, error, refreshing, refresh, reload } = useAsync(
+    () => fetchLabPackages(category ? { category } : {}),
+    [category]
+  );
+
+  const packages = useMemo(() => {
+    const list = data?.packages ?? [];
+    const q = query.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (p) => p.testName.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)
+    );
+  }, [data, query]);
+
+  const book = async (testId: string, testName: string) => {
+    setBookingId(testId);
+    try {
+      const order = await bookLabTest({ testId });
+      Alert.alert('Test booked', `${testName} is scheduled. We'll collect your sample soon.`, [
+        { text: 'View order', onPress: () => navigation.navigate('LabResult', { orderId: order.id }) },
+        { text: 'OK' },
+      ]);
+    } catch (err) {
+      Alert.alert('Could not book', errorMessage(err));
+    } finally {
+      setBookingId(null);
+    }
+  };
+
+  return (
+    <Screen padded={false} refreshing={refreshing} onRefresh={refresh} bottomInset={spacing.xxl}>
+      <TopBar title="Lab Tests" onNotificationsPress={() => navigation.navigate('Orders')} />
+
+      <View style={styles.page}>
+        <SearchBar value={query} onChangeText={setQuery} placeholder="Search lab tests" />
+
+        <PromoBanner
+          eyebrow="Home Collection"
+          title="Free sample pickup at your doorstep"
+          actionLabel="Learn more"
+        />
+
+        <View>
+          <SectionHeader
+            title="Categories"
+            actionLabel={category ? 'Clear' : undefined}
+            onActionPress={() => setCategory(null)}
+          />
+          <ChipRow>
+            {CATEGORIES.map((c) => (
+              <Chip
+                key={c}
+                label={c}
+                icon="biotech"
+                tint="warning"
+                selected={category === c}
+                onPress={() => setCategory(category === c ? null : c)}
+              />
+            ))}
+          </ChipRow>
+        </View>
+
+        <View style={styles.list}>
+          <SectionHeader title={category ?? 'Popular Tests'} />
+
+          {loading ? (
+            <Loading />
+          ) : error ? (
+            <ErrorState message={error} onRetry={reload} />
+          ) : packages.length === 0 ? (
+            <EmptyState icon="search_off" title="No tests found" message="Try another category." />
+          ) : (
+            packages.map((pkg) => (
+              <Card key={pkg.id} style={styles.testCard}>
+                <View style={styles.testHead}>
+                  <View style={styles.testIcon}>
+                    <Icon name="biotech" size={22} color={colors.warningDark} />
+                  </View>
+
+                  <View style={styles.flex}>
+                    <Text variant="headlineSmMobile" color={colors.headingDark}>
+                      {pkg.testName}
+                    </Text>
+                    <Text variant="captionSm" color={colors.captionGray}>
+                      {pkg.category} · {pkg.sampleType}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.testMeta}>
+                  {pkg.fastingReq ? (
+                    <Badge label="Fasting required" tint="warning" icon="schedule" />
+                  ) : (
+                    <Badge label="No fasting" tint="success" icon="check_circle" />
+                  )}
+                  <Badge label="Home collection" tint="info" icon="home" />
+                </View>
+
+                <View style={styles.testFoot}>
+                  <Text variant="displayBold" color={colors.primary}>
+                    ${pkg.price.toFixed(2)}
+                  </Text>
+                  <Button
+                    label="Book test"
+                    size="md"
+                    loading={bookingId === pkg.id}
+                    onPress={() => book(pkg.id, pkg.testName)}
+                  />
+                </View>
+              </Card>
+            ))
+          )}
+        </View>
+      </View>
+    </Screen>
+  );
+};
+
+const styles = StyleSheet.create({
+  page: { paddingHorizontal: spacing.insetPage, gap: spacing.xl },
+  list: { gap: spacing.insetCard },
+  testCard: { gap: spacing.insetCard },
+  testHead: { flexDirection: 'row', gap: spacing.insetCard, alignItems: 'center' },
+  testIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.warningLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flex: { flex: 1 },
+  testMeta: { flexDirection: 'row', gap: spacing.base, flexWrap: 'wrap' },
+  testFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+});

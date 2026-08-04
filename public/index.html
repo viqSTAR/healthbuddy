@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Health Buddy - Complete Healthcare Platform</title>
+  
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  
+  <!-- Material Symbols Outlined -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  
+  <!-- Stitch Exact Tailwind Config -->
+  <script id="tailwind-config">
+    try {
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+              "surface-bright": "#e7fff2",
+              "on-error-container": "#93000a",
+              "surface-container-high": "#d3eee1",
+              "on-primary": "#ffffff",
+              "background": "#e7fff2",
+              "surface-container-low": "#defaec",
+              "on-tertiary": "#ffffff",
+              "primary-fixed-dim": "#6bdbab",
+              "error-container": "#ffdad6",
+              "primary": "#006949",
+              "surface-container": "#d9f4e6",
+              "tertiary-fixed-dim": "#d0c6ad",
+              "secondary-fixed-dim": "#abc7ff",
+              "caption-gray": "#6F8278",
+              "on-error": "#ffffff",
+              "on-secondary-fixed-variant": "#00458f",
+              "tertiary-container": "#7c745f",
+              "outline-variant": "#bdcac0",
+              "on-tertiary-container": "#fffbff",
+              "secondary-container": "#0472e3",
+              "on-background": "#072018",
+              "surface-container-lowest": "#ffffff",
+              "success-light": "#DDF6E9",
+              "surface-container-highest": "#cde9db",
+              "on-secondary-container": "#fefcff",
+              "surface-tint": "#006c4b",
+              "on-primary-container": "#f5fff7",
+              "on-tertiary-fixed": "#201b0c",
+              "primary-container": "#00855d",
+              "on-primary-fixed": "#002114",
+              "inverse-primary": "#6bdbab",
+              "on-secondary": "#ffffff",
+              "on-tertiary-fixed-variant": "#4d4634",
+              "heading-dark": "#10231B",
+              "error": "#ba1a1a",
+              "tertiary-fixed": "#ede1c8",
+              "surface-variant": "#cde9db",
+              "outline": "#6d7a72",
+              "on-surface-variant": "#3d4943",
+              "secondary": "#005ab6",
+              "on-surface": "#072018",
+              "inverse-surface": "#1d352c",
+              "secondary-fixed": "#d7e3ff",
+              "danger-light": "#FCE8E7",
+              "on-primary-fixed-variant": "#005138",
+              "on-secondary-fixed": "#001b3f",
+              "success-dark": "#087A55",
+              "surface": "#e7fff2",
+              "primary-fixed": "#88f8c5",
+              "inverse-on-surface": "#dcf7e9",
+              "info-light": "#EAF4FF",
+              "tertiary": "#635b48",
+              "surface-dim": "#c5e0d3"
+            },
+            "borderRadius": {
+              "DEFAULT": "0.25rem",
+              "lg": "0.5rem",
+              "xl": "0.75rem",
+              "full": "9999px"
+            },
+            "fontFamily": {
+              "display-bold": ["Inter"],
+              "caption-sm": ["Inter"],
+              "label-md": ["Inter"],
+              "headline-sm": ["Inter"],
+              "body-md": ["Inter"]
+            }
+          }
+        }
+      }
+    } catch(_e){}
+  </script>
+
+  <style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background min-h-screen pb-20">
+
+  <!-- Top App Role Switcher Bar -->
+  <nav class="bg-heading-dark text-white px-4 py-2 text-xs flex justify-between items-center sticky top-0 z-50 shadow-md">
+    <div class="flex items-center gap-2">
+      <span class="material-symbols-outlined text-primary-fixed text-base">health_and_safety</span>
+      <span class="font-bold tracking-wide">HEALTH BUDDY PORTAL</span>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="switchRole('PATIENT')" id="role-PATIENT" class="px-3 py-1 rounded-full font-bold bg-primary text-white transition-all">📱 Patient App</button>
+      <button onclick="switchRole('DOCTOR')" id="role-DOCTOR" class="px-3 py-1 rounded-full font-bold bg-surface-container-highest text-heading-dark transition-all">🩺 Doctor App</button>
+      <button onclick="switchRole('PARTNER')" id="role-PARTNER" class="px-3 py-1 rounded-full font-bold bg-surface-container-highest text-heading-dark transition-all">🧪 Pharmacy & Lab</button>
+      <button onclick="switchRole('ADMIN')" id="role-ADMIN" class="px-3 py-1 rounded-full font-bold bg-surface-container-highest text-heading-dark transition-all">🖥️ Admin Web</button>
+    </div>
+  </nav>
+
+  <!-- 1. PATIENT / USER APP VIEW -->
+  <div id="view-PATIENT" class="block max-w-xl mx-auto px-4 py-4 space-y-6">
+    <!-- Header -->
+    <header class="flex justify-between items-center py-2">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 bg-primary rounded-full flex items-center justify-center text-on-primary shadow-sm">
+          <span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">spa</span>
+        </div>
+        <div>
+          <h1 class="font-display-bold text-lg text-primary">Health Buddy</h1>
+          <p class="text-xs text-caption-gray">Welcome back, Alex Vance</p>
+        </div>
+      </div>
+      <button onclick="openAuthModal()" class="w-10 h-10 bg-surface-container-lowest rounded-full flex items-center justify-center text-primary hover:bg-surface-container-low transition-all shadow-sm">
+        <span class="material-symbols-outlined">person</span>
+      </button>
+    </header>
+
+    <!-- Emergency SOS Banner -->
+    <section onclick="triggerSOS()" class="bg-error text-white rounded-[20px] p-4 flex items-center justify-between cursor-pointer shadow-lg hover:scale-[1.01] transition-transform">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+          <span class="material-symbols-outlined text-3xl animate-pulse">emergency</span>
+        </div>
+        <div>
+          <h2 class="font-bold text-base">Emergency Ambulance SOS</h2>
+          <p class="text-xs text-error-container">One-tap GPS ambulance dispatch</p>
+        </div>
+      </div>
+      <span class="material-symbols-outlined">arrow_forward_ios</span>
+    </section>
+
+    <!-- Quick Actions Bento Grid -->
+    <section class="grid grid-cols-4 gap-2">
+      <div onclick="scrollToSection('doctors-sec')" class="flex flex-col items-center gap-2 group cursor-pointer">
+        <div class="w-12 h-12 bg-success-light rounded-[16px] flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
+          <span class="material-symbols-outlined text-success-dark">calendar_month</span>
+        </div>
+        <span class="text-[11px] font-semibold text-center text-on-surface-variant">Book Doctor</span>
+      </div>
+      <div onclick="scrollToSection('pharmacy-sec')" class="flex flex-col items-center gap-2 group cursor-pointer">
+        <div class="w-12 h-12 bg-info-light rounded-[16px] flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
+          <span class="material-symbols-outlined text-secondary">pill</span>
+        </div>
+        <span class="text-[11px] font-semibold text-center text-on-surface-variant">Medicines</span>
+      </div>
+      <div onclick="scrollToSection('labs-sec')" class="flex flex-col items-center gap-2 group cursor-pointer">
+        <div class="w-12 h-12 bg-[#FFF3D9] rounded-[16px] flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
+          <span class="material-symbols-outlined text-[#8B6E2F]">biotech</span>
+        </div>
+        <span class="text-[11px] font-semibold text-center text-on-surface-variant">Lab Tests</span>
+      </div>
+      <div onclick="openTelehealthLobby()" class="flex flex-col items-center gap-2 group cursor-pointer">
+        <div class="w-12 h-12 bg-surface-container-highest rounded-[16px] flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
+          <span class="material-symbols-outlined text-primary">videocam</span>
+        </div>
+        <span class="text-[11px] font-semibold text-center text-on-surface-variant">Telehealth</span>
+      </div>
+    </section>
+
+    <!-- Doctor Directory Section -->
+    <section id="doctors-sec" class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-lg text-heading-dark">Top Specialist Doctors</h2>
+        <span class="text-xs font-bold text-primary cursor-pointer">See All</span>
+      </div>
+      <div id="doctor-list-container" class="space-y-3">
+        <!-- Rendered via JS -->
+      </div>
+    </section>
+
+    <!-- E-Pharmacy Medicine Store Section -->
+    <section id="pharmacy-sec" class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-lg text-heading-dark">E-Pharmacy Medicine Store</h2>
+        <span class="text-xs font-semibold text-caption-gray">Nearest Store Auto-Routing</span>
+      </div>
+      <div id="medicine-list-container" class="grid grid-cols-2 gap-3">
+        <!-- Rendered via JS -->
+      </div>
+    </section>
+
+    <!-- Diagnostic Lab Packages Section -->
+    <section id="labs-sec" class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-lg text-heading-dark">Diagnostic Lab Checkups</h2>
+        <span class="text-xs font-semibold text-caption-gray">Home Sample Pickup</span>
+      </div>
+      <div id="lab-list-container" class="space-y-3">
+        <!-- Rendered via JS -->
+      </div>
+    </section>
+  </div>
+
+  <!-- 2. DOCTOR APP VIEW -->
+  <div id="view-DOCTOR" class="hidden max-w-xl mx-auto px-4 py-4 space-y-6">
+    <header class="bg-surface-container-lowest rounded-[20px] p-4 flex justify-between items-center shadow-sm">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 bg-primary text-white rounded-full flex items-center justify-center font-bold text-xl">
+          SJ
+        </div>
+        <div>
+          <h1 class="font-bold text-base text-heading-dark">Dr. Sarah Jenkins</h1>
+          <p class="text-xs text-caption-gray">Cardiologist • Reg No: MED-884920</p>
+        </div>
+      </div>
+      <span class="bg-success-light text-success-dark font-bold text-xs px-3 py-1 rounded-full">VERIFIED</span>
+    </header>
+
+    <section class="bg-surface-container-lowest rounded-[20px] p-4 space-y-4 shadow-sm">
+      <h2 class="font-bold text-base text-heading-dark">Today's Appointment Queue</h2>
+      <div id="doctor-queue-container" class="space-y-3">
+        <!-- Rendered via JS -->
+      </div>
+    </section>
+
+    <!-- Digital Prescription Generator -->
+    <section class="bg-surface-container-lowest rounded-[20px] p-4 space-y-4 shadow-sm">
+      <h2 class="font-bold text-base text-heading-dark">Digital Prescription Composer</h2>
+      <input type="text" id="rx-patient-name" placeholder="Patient Name" class="w-full bg-background border-none rounded-xl text-sm p-3">
+      <input type="text" id="rx-diagnosis" placeholder="Diagnosis (e.g. Hypertension & Mild Fever)" class="w-full bg-background border-none rounded-xl text-sm p-3">
+      <textarea id="rx-medicines" placeholder="Medicines & Dosage (e.g. Paracetamol 500mg - 1 tab after food)" class="w-full bg-background border-none rounded-xl text-sm p-3 h-24"></textarea>
+      <button onclick="generatePrescription()" class="w-full bg-primary text-white font-bold py-3 rounded-xl hover:bg-primary-container transition-all">
+        Issue Digital Prescription
+      </button>
+    </section>
+  </div>
+
+  <!-- 3. PHARMACY & LAB PARTNER APP VIEW -->
+  <div id="view-PARTNER" class="hidden max-w-xl mx-auto px-4 py-4 space-y-6">
+    <div class="flex gap-2 bg-surface-container-high p-1 rounded-2xl">
+      <button onclick="setPartnerMode('PHARMACY')" id="pmode-PHARMACY" class="flex-1 font-bold text-xs py-2 rounded-xl bg-primary text-white">💊 Medical Store</button>
+      <button onclick="setPartnerMode('LAB')" id="pmode-LAB" class="flex-1 font-bold text-xs py-2 rounded-xl bg-transparent text-heading-dark">🧪 Laboratory</button>
+    </div>
+
+    <!-- Pharmacy Partner View -->
+    <div id="partner-pharmacy-view" class="space-y-4">
+      <div class="bg-surface-container-lowest rounded-[20px] p-4 space-y-3 shadow-sm">
+        <h2 class="font-bold text-base text-heading-dark">Pharmacy License Registration</h2>
+        <p class="text-xs text-caption-gray">Upload Drug License & GSTIN for Admin Verification</p>
+        <input type="text" placeholder="Pharmacy Name" class="w-full bg-background border-none rounded-xl text-sm p-3">
+        <input type="text" placeholder="Drug License Number (DL-99420)" class="w-full bg-background border-none rounded-xl text-sm p-3">
+        <button class="w-full bg-primary text-white font-bold py-2.5 rounded-xl">Submit License Credentials</button>
+      </div>
+
+      <div class="bg-surface-container-lowest rounded-[20px] p-4 space-y-3 shadow-sm">
+        <h2 class="font-bold text-base text-heading-dark">Incoming Pharmacy Orders Queue</h2>
+        <div id="pharmacy-orders-queue" class="space-y-2">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Lab Partner View -->
+    <div id="partner-lab-view" class="hidden space-y-4">
+      <div class="bg-surface-container-lowest rounded-[20px] p-4 space-y-3 shadow-sm">
+        <h2 class="font-bold text-base text-heading-dark">Lab NABL Certification</h2>
+        <p class="text-xs text-caption-gray">Upload NABL Accreditation Number</p>
+        <input type="text" placeholder="Diagnostic Lab Name" class="w-full bg-background border-none rounded-xl text-sm p-3">
+        <input type="text" placeholder="NABL Accreditation Cert No." class="w-full bg-background border-none rounded-xl text-sm p-3">
+        <button class="w-full bg-primary text-white font-bold py-2.5 rounded-xl">Submit Lab Credentials</button>
+      </div>
+
+      <div class="bg-surface-container-lowest rounded-[20px] p-4 space-y-3 shadow-sm">
+        <h2 class="font-bold text-base text-heading-dark">Diagnostic Sample Queue & Report Upload</h2>
+        <div id="lab-orders-queue" class="space-y-2">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. ADMIN WEB CONSOLE VIEW -->
+  <div id="view-ADMIN" class="hidden max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <div class="bg-heading-dark text-white rounded-[20px] p-6 flex justify-between items-center shadow-lg">
+      <div>
+        <h1 class="font-bold text-2xl text-primary-fixed">Health Buddy Admin Web Console</h1>
+        <p class="text-xs text-caption-gray">Provider License Verification & Order Routing Oversight</p>
+      </div>
+      <div class="bg-primary-container px-4 py-2 rounded-xl text-right">
+        <span class="text-xs text-surface-container-low font-bold">System Status</span>
+        <p class="text-sm font-bold text-white">⚡ OPERATIONAL (943 req/s)</p>
+      </div>
+    </div>
+
+    <!-- Admin Verification Queue -->
+    <section class="bg-surface-container-lowest rounded-[20px] p-6 space-y-4 shadow-sm">
+      <h2 class="font-bold text-lg text-heading-dark">Provider License Verification Queue</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-sm">
+          <thead>
+            <tr class="border-b border-surface-container text-caption-gray font-bold">
+              <th class="py-2">Provider Name</th>
+              <th class="py-2">Role</th>
+              <th class="py-2">License Number</th>
+              <th class="py-2">Status</th>
+              <th class="py-2">Action</th>
+            </tr>
+          </thead>
+          <tbody id="admin-verification-table">
+            <tr class="border-b border-surface-container-low">
+              <td class="py-3 font-bold">Dr. Marcus Vance</td>
+              <td class="py-3">Doctor</td>
+              <td class="py-3 font-mono text-xs">MED-884920</td>
+              <td class="py-3"><span class="bg-yellow-100 text-yellow-800 font-bold px-2 py-0.5 rounded text-xs">PENDING</span></td>
+              <td class="py-3">
+                <button onclick="approveProvider(this)" class="bg-success-dark text-white text-xs font-bold px-3 py-1 rounded-lg">Approve (Verify)</button>
+              </td>
+            </tr>
+            <tr class="border-b border-surface-container-low">
+              <td class="py-3 font-bold">Apollo Pharmacy Store #12</td>
+              <td class="py-3">Pharmacy</td>
+              <td class="py-3 font-mono text-xs">DL-773410</td>
+              <td class="py-3"><span class="bg-yellow-100 text-yellow-800 font-bold px-2 py-0.5 rounded text-xs">PENDING</span></td>
+              <td class="py-3">
+                <button onclick="approveProvider(this)" class="bg-success-dark text-white text-xs font-bold px-3 py-1 rounded-lg">Approve (Verify)</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Nearest Pharmacy Order Routing Oversight -->
+    <section class="bg-surface-container-lowest rounded-[20px] p-6 space-y-4 shadow-sm">
+      <h2 class="font-bold text-lg text-heading-dark">Nearest Pharmacy Order Routing Control</h2>
+      <p class="text-xs text-caption-gray">Automated Geospatial Routing Engine (Haversine Distance + Inventory Stock)</p>
+      <div id="admin-routing-logs" class="bg-heading-dark text-primary-fixed p-4 rounded-xl font-mono text-xs space-y-1">
+        <p>[LOG 14:40:12] Order #order_101 ➔ Routed to Apollo Pharmacy Store #12 (Distance: 1.2 km, Stock: Available)</p>
+        <p>[LOG 14:41:05] Order #order_102 ➔ Routed to Wellness Pharmacy (Distance: 0.8 km, Stock: Available)</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- AUTH MODAL -->
+  <div id="auth-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-surface-container-lowest rounded-[24px] max-w-sm w-full p-6 space-y-4 shadow-2xl">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-lg text-heading-dark">Phone + OTP Login</h3>
+        <button onclick="closeAuthModal()" class="text-caption-gray"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <input type="text" id="auth-phone" value="+15550192834" placeholder="Phone Number" class="w-full bg-background border-none rounded-xl p-3 text-sm">
+      <button onclick="sendOtp()" class="w-full bg-primary text-white font-bold py-3 rounded-xl">Send OTP Code</button>
+      <div id="otp-section" class="hidden space-y-3 pt-2">
+        <input type="text" id="auth-otp" placeholder="Enter 6-digit OTP" class="w-full bg-background border-none rounded-xl p-3 text-sm">
+        <button onclick="verifyOtp()" class="w-full bg-success-dark text-white font-bold py-3 rounded-xl">Verify & Sign In</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JS APP CONTROLLER -->
+  <script>
+    const API_BASE = 'http://localhost:5000/api/v1';
+
+    function switchRole(role) {
+      ['PATIENT', 'DOCTOR', 'PARTNER', 'ADMIN'].forEach(r => {
+        document.getElementById(`view-${r}`).classList.add('hidden');
+        const btn = document.getElementById(`role-${r}`);
+        btn.className = 'px-3 py-1 rounded-full font-bold text-xs transition-all ' + 
+          (r === role ? 'bg-primary text-white' : 'bg-surface-container-highest text-heading-dark');
+      });
+      document.getElementById(`view-${role}`).classList.remove('hidden');
+    }
+
+    function setPartnerMode(mode) {
+      if (mode === 'PHARMACY') {
+        document.getElementById('partner-pharmacy-view').classList.remove('hidden');
+        document.getElementById('partner-lab-view').classList.add('hidden');
+        document.getElementById('pmode-PHARMACY').className = 'flex-1 font-bold text-xs py-2 rounded-xl bg-primary text-white';
+        document.getElementById('pmode-LAB').className = 'flex-1 font-bold text-xs py-2 rounded-xl bg-transparent text-heading-dark';
+      } else {
+        document.getElementById('partner-pharmacy-view').classList.add('hidden');
+        document.getElementById('partner-lab-view').classList.remove('hidden');
+        document.getElementById('pmode-LAB').className = 'flex-1 font-bold text-xs py-2 rounded-xl bg-primary text-white';
+        document.getElementById('pmode-PHARMACY').className = 'flex-1 font-bold text-xs py-2 rounded-xl bg-transparent text-heading-dark';
+      }
+    }
+
+    async function loadData() {
+      // Load Doctors
+      try {
+        const res = await fetch(`${API_BASE}/doctors`);
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('doctor-list-container').innerHTML = data.doctors.map(d => `
+            <div class="bg-surface-container-lowest rounded-[20px] p-4 flex justify-between items-center shadow-sm">
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 bg-surface-container-high text-primary rounded-full flex items-center justify-center font-bold">
+                  ${d.name.charAt(4)}
+                </div>
+                <div>
+                  <h3 class="font-bold text-sm text-heading-dark">${d.name}</h3>
+                  <p class="text-xs text-caption-gray">${d.specialty} • ⭐ ${d.rating}</p>
+                  <p class="text-xs text-primary font-bold">$${d.consultationFee}</p>
+                </div>
+              </div>
+              <button onclick="bookDoctor('${d.id}')" class="bg-primary text-white text-xs font-bold px-3 py-2 rounded-xl">Book Slot</button>
+            </div>
+          `).join('');
+
+          document.getElementById('doctor-queue-container').innerHTML = data.doctors.map(d => `
+            <div class="bg-background rounded-xl p-3 flex justify-between items-center text-xs">
+              <div>
+                <p class="font-bold text-heading-dark">${d.name}'s Next Patient</p>
+                <p class="text-caption-gray">Slot: 15:30 PM • Type: Video Consult</p>
+              </div>
+              <button onclick="alert('Joining Telehealth Lobby...')" class="bg-primary text-white font-bold px-3 py-1.5 rounded-lg">Join Call</button>
+            </div>
+          `).join('');
+        }
+      } catch (e) {}
+
+      // Load Medicines
+      try {
+        const res = await fetch(`${API_BASE}/pharmacy/medicines`);
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('medicine-list-container').innerHTML = data.medicines.map(m => `
+            <div class="bg-surface-container-lowest rounded-[20px] p-3 flex flex-col justify-between shadow-sm">
+              <div>
+                <span class="text-[10px] font-bold text-primary uppercase">${m.category}</span>
+                <h4 class="font-bold text-xs text-heading-dark mt-1">${m.name}</h4>
+                <p class="text-[11px] text-caption-gray line-clamp-2 mt-1">${m.description}</p>
+              </div>
+              <div class="flex justify-between items-center mt-3">
+                <span class="font-bold text-sm text-heading-dark">$${m.price}</span>
+                <button onclick="orderMedicine('${m.id}')" class="bg-primary text-white text-xs font-bold px-2.5 py-1.5 rounded-lg">Add</button>
+              </div>
+            </div>
+          `).join('');
+
+          document.getElementById('pharmacy-orders-queue').innerHTML = data.medicines.slice(0, 2).map((m, i) => `
+            <div class="bg-background rounded-xl p-3 flex justify-between items-center text-xs">
+              <div>
+                <p class="font-bold text-heading-dark">Order #${101 + i} - ${m.name}</p>
+                <p class="text-caption-gray">Route: Nearest Store (0.8km away)</p>
+              </div>
+              <button onclick="alert('Order Dispatched!')" class="bg-success-dark text-white font-bold px-2.5 py-1 rounded-lg">Dispatch</button>
+            </div>
+          `).join('');
+        }
+      } catch (e) {}
+
+      // Load Labs
+      try {
+        const res = await fetch(`${API_BASE}/labs/packages`);
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('lab-list-container').innerHTML = data.packages.map(l => `
+            <div class="bg-surface-container-lowest rounded-[20px] p-4 flex justify-between items-center shadow-sm">
+              <div>
+                <span class="text-[10px] font-bold text-primary uppercase">${l.category}</span>
+                <h3 class="font-bold text-sm text-heading-dark mt-0.5">${l.testName}</h3>
+                <p class="text-xs text-caption-gray mt-1">Sample: ${l.sampleType}</p>
+              </div>
+              <div class="text-right">
+                <p class="font-bold text-sm text-primary mb-2">$${l.price}</p>
+                <button onclick="bookLab('${l.id}')" class="bg-primary text-white text-xs font-bold px-3 py-1.5 rounded-xl">Book Test</button>
+              </div>
+            </div>
+          `).join('');
+
+          document.getElementById('lab-orders-queue').innerHTML = data.packages.slice(0, 2).map((l, i) => `
+            <div class="bg-background rounded-xl p-3 flex justify-between items-center text-xs">
+              <div>
+                <p class="font-bold text-heading-dark">Sample #${501 + i} - ${l.testName}</p>
+                <p class="text-caption-gray">Status: Sample Collected</p>
+              </div>
+              <button onclick="alert('Upload Report PDF Triggered')" class="bg-secondary text-white font-bold px-2.5 py-1 rounded-lg">Upload PDF</button>
+            </div>
+          `).join('');
+        }
+      } catch (e) {}
+    }
+
+    function triggerSOS() {
+      alert('🚨 EMERGENCY SOS DISPATCHED! Ambulance is en-route to your live GPS coordinates.');
+    }
+
+    function bookDoctor(id) {
+      alert('📅 Appointment Slot Locked & Booked via Redis Concurrency Engine!');
+    }
+
+    function orderMedicine(id) {
+      alert('🛍️ Medicine added! Auto-routing order to nearest verified pharmacy store.');
+    }
+
+    function bookLab(id) {
+      alert('🧪 Diagnostic Lab Test booked! Home sample pickup scheduled.');
+    }
+
+    function generatePrescription() {
+      alert('📜 Digital Prescription generated & attached to patient EMR vault!');
+    }
+
+    function approveProvider(btn) {
+      btn.parentElement.innerHTML = '<span class="bg-success-light text-success-dark font-bold px-3 py-1 rounded-lg text-xs">VERIFIED & APPROVED</span>';
+    }
+
+    function openAuthModal() { document.getElementById('auth-modal').classList.remove('hidden'); }
+    function closeAuthModal() { document.getElementById('auth-modal').classList.add('hidden'); }
+    
+    async function sendOtp() {
+      const phone = document.getElementById('auth-phone').value;
+      const res = await fetch(`${API_BASE}/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: phone })
+      });
+      const data = await res.json();
+      if (data.success) {
+        document.getElementById('otp-section').classList.remove('hidden');
+        if (data.devOtp) document.getElementById('auth-otp').value = data.devOtp;
+      }
+    }
+
+    async function verifyOtp() {
+      alert('✅ Phone + OTP Authenticated Successfully!');
+      closeAuthModal();
+    }
+
+    function scrollToSection(id) {
+      document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+    }
+
+    window.onload = loadData;
+  </script>
+</body>
+</html>

@@ -1,0 +1,812 @@
+// Prisma Schema for Health Buddy Platform
+//
+// Four client surfaces sit on this schema: the patient app, the doctor app,
+// the partner app (pharmacy + lab), and the admin web panel.
+//
+// Two rules drive the design and should survive future edits:
+//
+//  1. A provider's ROLE is a grant, never a claim. Applicants submit a
+//     ProviderApplication describing what they want to be; an admin approves
+//     it and only then does the server create the Doctor/Pharmacy/LabPartner
+//     row and change User.role. Nothing in the request body decides a role.
+//
+//  2. Uploaded files are addressed by opaque storage key, never a public URL.
+//     Lab reports and prescriptions are health data; access is authorised per
+//     request and served through short-lived signed links.
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  PATIENT
+  DOCTOR
+  LAB_PARTNER
+  PHARMACY
+  ADMIN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AppointmentType {
+  VIDEO
+  IN_PERSON
+}
+
+enum SlotStatus {
+  AVAILABLE
+  LOCKED
+  BOOKED
+}
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  PROCESSING
+  DISPATCHED
+  DELIVERED
+  CANCELLED
+}
+
+enum LabOrderStatus {
+  BOOKED
+  ACCEPTED
+  SAMPLE_COLLECTED
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+enum EmergencyStatus {
+  RAISED
+  DISPATCHED
+  EN_ROUTE
+  ARRIVED
+  RESOLVED
+  CANCELLED
+}
+
+/// Which application an entity belongs to. One person may hold a patient and a
+/// provider identity, so device tokens are keyed by user *and* app.
+enum AppId {
+  PATIENT
+  DOCTOR
+  PARTNER
+  ADMIN
+}
+
+// ---------------------------------------------------------------------------
+// Provider onboarding & verification
+// ---------------------------------------------------------------------------
+
+enum ApplicationType {
+  DOCTOR
+  PHARMACY
+  LAB
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum DocumentKind {
+  // Doctor
+  DOCTOR_REGISTRATION_CERT
+  DOCTOR_QUALIFICATION
+  // Pharmacy
+  DRUG_LICENCE
+  PHARMACIST_CERT
+  // Lab
+  LAB_REGISTRATION
+  NABL_CERTIFICATE
+  // Shared business proof
+  GST_CERTIFICATE
+  SHOP_ESTABLISHMENT
+  ID_PROOF
+  PREMISES_PHOTO
+  // Clinical artefacts
+  LAB_REPORT
+  PRESCRIPTION_IMAGE
+  PROFILE_PHOTO
+}
+
+// ---------------------------------------------------------------------------
+// Drug classification — drives what a doctor may prescribe over telemedicine
+// ---------------------------------------------------------------------------
+
+/// Drugs & Cosmetics Act scheduling. SCHEDULE_X and NARCOTIC may never be sold
+/// online and must be excluded from the patient-facing catalogue.
+enum DrugSchedule {
+  OTC
+  SCHEDULE_H
+  SCHEDULE_H1
+  SCHEDULE_X
+  NARCOTIC
+}
+
+/// Telemedicine Practice Guidelines drug lists.
+///   LIST_O — over the counter, prescribable in any consult
+///   LIST_A — first consult allowed, but video only
+///   LIST_B — follow-up consultations only
+///   PROHIBITED — never prescribable over telemedicine
+enum TeleDrugList {
+  LIST_O
+  LIST_A
+  LIST_B
+  PROHIBITED
+}
+
+enum NotificationType {
+  APPLICATION_SUBMITTED
+  APPLICATION_APPROVED
+  APPLICATION_REJECTED
+  APPOINTMENT_BOOKED
+  APPOINTMENT_CANCELLED
+  CONSULT_READY
+  PRESCRIPTION_ISSUED
+  ORDER_PLACED
+  ORDER_STATUS_CHANGED
+  LAB_BOOKED
+  LAB_REPORT_READY
+  LOW_STOCK
+  SOS_RAISED
+  GENERIC
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentPurpose {
+  APPOINTMENT
+  MEDICINE_ORDER
+  LAB_ORDER
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id          String   @id @default(uuid())
+  phoneNumber String   @unique
+  role        Role     @default(PATIENT)
+  isVerified  Boolean  @default(true)
+  isSuspended Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  patient    Patient?
+  doctor     Doctor?
+  labPartner LabPartner?
+  pharmacy   Pharmacy?
+
+  applications         ProviderApplication[] @relation("ApplicationApplicant")
+  reviewedApplications ProviderApplication[] @relation("ApplicationReviewer")
+  documents            Document[]
+  deviceTokens         DeviceToken[]
+  notifications        Notification[]
+  payments             Payment[]
+  auditLogs            AuditLog[]
+  assignedOrders       MedicineOrder[]       @relation("OrderAgent")
+  assignedLabOrders    LabOrder[]            @relation("LabOrderAgent")
+
+  @@index([phoneNumber])
+  @@index([role])
+}
+
+model Patient {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName          String
+  email             String?
+  age               Int?
+  gender            Gender?
+  bloodGroup        String?
+  emergencyContact  String?
+  address           String?
+  latitude          Float?
+  longitude         Float?
+  allergies         String?
+  chronicConditions String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  appointments   Appointment[]
+  prescriptions  Prescription[]
+  medicineOrders MedicineOrder[]
+  labOrders      LabOrder[]
+  emergencyLogs  EmergencySOS[]
+}
+
+model Doctor {
+  id              String  @id @default(uuid())
+  userId          String  @unique
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  specialty       String
+  qualification   String?
+  experienceYears Int     @default(0)
+  consultationFee Float
+  rating          Float   @default(4.9)
+  about           String?
+  languages       String?
+  clinicAddress   String?
+  isAvailable     Boolean @default(true)
+
+  /// Registration number issued by the NMC / State Medical Council. The
+  /// Telemedicine Practice Guidelines require this on every prescription.
+  councilRegistrationNumber String?
+  councilName               String?
+  /// ABDM Healthcare Professionals Registry id, when the doctor has one.
+  hprId                     String?
+  verifiedAt                DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  slots         DoctorSlot[]
+  appointments  Appointment[]
+  prescriptions Prescription[]
+
+  @@index([specialty])
+  @@index([isAvailable])
+}
+
+model Pharmacy {
+  id      String @id @default(uuid())
+  userId  String @unique
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name    String
+  address String
+
+  city             String?
+  state            String?
+  pincode          String?
+  latitude         Float?
+  longitude        Float?
+  deliveryRadiusKm Float   @default(10)
+  isActive         Boolean @default(true)
+
+  /// Retail drug licence issued by the State Drug Control Authority. The
+  /// platform is a marketplace — the partner holds the licence, not us.
+  /// An expired licence must suspend the partner.
+  drugLicenceNumber String?
+  drugLicenceExpiry DateTime?
+  gstin             String?
+  pharmacistName    String?
+  /// ABDM Health Facility Registry id.
+  hfrId             String?
+  verifiedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  // Defaulted so the column can backfill over pharmacies created before this
+  // field existed; @updatedAt still maintains it on every write.
+  updatedAt DateTime @default(now()) @updatedAt
+
+  orders    MedicineOrder[]
+  inventory PharmacyInventory[]
+
+  @@index([isActive])
+}
+
+model LabPartner {
+  id       String @id @default(uuid())
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name     String
+  location String
+
+  address        String?
+  city           String?
+  state          String?
+  pincode        String?
+  latitude       Float?
+  longitude      Float?
+  homeCollection Boolean @default(true)
+  isActive       Boolean @default(true)
+
+  labRegistrationNumber String?
+  nablAccredited        Boolean   @default(false)
+  nablCertNumber        String?
+  nablExpiry            DateTime?
+  hfrId                 String?
+  verifiedAt            DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  labOrders LabOrder[]
+  offerings LabOffering[]
+
+  @@index([isActive])
+}
+
+/// A request to become a provider. Submitting one grants nothing — an admin
+/// approves it, and approval is what creates the profile row and flips the
+/// user's role. `type` selects the registration form and the post-approval UI;
+/// it is never consulted for authorisation.
+model ProviderApplication {
+  id     String            @id @default(uuid())
+  userId String
+  user   User              @relation("ApplicationApplicant", fields: [userId], references: [id], onDelete: Cascade)
+  type   ApplicationType
+  status ApplicationStatus @default(DRAFT)
+
+  // Common business identity
+  displayName  String
+  contactEmail String?
+  address      String
+  city         String?
+  state        String?
+  pincode      String?
+  latitude     Float?
+  longitude    Float?
+
+  // ABDM registry identifiers. HPR for individual professionals, HFR for
+  // facilities (which explicitly covers pharmacies and diagnostic labs).
+  hprId             String?
+  hfrId             String?
+  registryVerified  Boolean   @default(false)
+  registryCheckedAt DateTime?
+  registryResponse  Json?
+
+  // Doctor-specific
+  councilRegistrationNumber String?
+  councilName               String?
+  qualification             String?
+  specialty                 String?
+  experienceYears           Int?
+  consultationFee           Float?
+
+  // Pharmacy-specific
+  drugLicenceNumber   String?
+  drugLicenceExpiry   DateTime?
+  gstin               String?
+  pharmacistName      String?
+  pharmacistRegNumber String?
+
+  // Lab-specific
+  labRegistrationNumber String?
+  nablAccredited        Boolean   @default(false)
+  nablCertNumber        String?
+  nablExpiry            DateTime?
+  homeCollection        Boolean   @default(true)
+
+  documents Document[]
+
+  submittedAt      DateTime?
+  reviewedByUserId String?
+  reviewedBy       User?     @relation("ApplicationReviewer", fields: [reviewedByUserId], references: [id])
+  reviewedAt       DateTime?
+  /// Shown to the applicant so a rejection is actionable rather than a dead end.
+  rejectionReason  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One live application per type per user; resubmission edits it in place.
+  @@unique([userId, type])
+  @@index([status, type])
+  @@index([submittedAt])
+}
+
+/// An uploaded file. `storageKey` is an opaque key into the storage driver, not
+/// a URL — nothing here is publicly reachable. Downloads go through an
+/// authorisation check and a short-lived signed link.
+model Document {
+  id          String       @id @default(uuid())
+  ownerUserId String
+  owner       User         @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  kind        DocumentKind
+  storageKey  String       @unique
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+
+  applicationId String?
+  application   ProviderApplication? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  labOrderId String?
+  labOrder   LabOrder? @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([ownerUserId])
+  @@index([applicationId])
+  @@index([labOrderId])
+}
+
+// ---------------------------------------------------------------------------
+// Consultations
+// ---------------------------------------------------------------------------
+
+model DoctorSlot {
+  id        String     @id @default(uuid())
+  doctorId  String
+  doctor    Doctor     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  date      String // YYYY-MM-DD
+  startTime String // HH:mm
+  endTime   String // HH:mm
+  status    SlotStatus @default(AVAILABLE)
+  createdAt DateTime   @default(now())
+
+  appointment Appointment?
+
+  @@unique([doctorId, date, startTime])
+  @@index([doctorId, date])
+}
+
+model Appointment {
+  id            String            @id @default(uuid())
+  patientId     String
+  patient       Patient           @relation(fields: [patientId], references: [id])
+  doctorId      String
+  doctor        Doctor            @relation(fields: [doctorId], references: [id])
+  slotId        String            @unique
+  slot          DoctorSlot        @relation(fields: [slotId], references: [id])
+  type          AppointmentType   @default(VIDEO)
+  status        AppointmentStatus @default(SCHEDULED)
+  symptoms      String?
+  meetingRoomId String?
+
+  /// Set at booking time by counting the patient's earlier completed consults
+  /// with this doctor. Determines which telemedicine drug lists are available.
+  isFollowUp Boolean   @default(false)
+  startedAt  DateTime?
+  endedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prescription Prescription?
+  payment      Payment?
+
+  @@index([patientId])
+  @@index([doctorId, status])
+}
+
+model Prescription {
+  id            String      @id @default(uuid())
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  patientId     String
+  patient       Patient     @relation(fields: [patientId], references: [id])
+  doctorId      String
+  doctor        Doctor      @relation(fields: [doctorId], references: [id])
+  diagnosis     String
+  /// PrescribedMedicine rows carry the structured items; this keeps the
+  /// free-text rendering the doctor confirmed at issue time.
+  medicines     Json
+  notes         String?
+  advice        String?
+  followUpDate  String?
+
+  /// Stamped at issue time rather than joined later, so the prescription
+  /// remains a faithful record even if the doctor's profile changes.
+  doctorRegistrationNumber String?
+  consultationMode         AppointmentType @default(VIDEO)
+  wasFollowUp              Boolean         @default(false)
+
+  createdAt DateTime @default(now())
+
+  items PrescribedMedicine[]
+
+  @@index([patientId])
+  @@index([doctorId])
+}
+
+/// Structured prescription line, linked to the catalogue so a patient can order
+/// against it and the pharmacy can verify the prescription actually covers what
+/// is being dispensed.
+model PrescribedMedicine {
+  id             String       @id @default(uuid())
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicineId     String?
+  medicine       Medicine?    @relation(fields: [medicineId], references: [id])
+  /// Free text fallback for a drug not in the catalogue.
+  name           String
+  dosage         String
+  frequency      String
+  durationDays   Int?
+  instructions   String?
+
+  @@index([prescriptionId])
+  @@index([medicineId])
+}
+
+// ---------------------------------------------------------------------------
+// Pharmacy
+// ---------------------------------------------------------------------------
+
+/// Canonical drug catalogue. Price and stock live per pharmacy in
+/// PharmacyInventory — this row only carries the reference MRP.
+model Medicine {
+  id           String  @id @default(uuid())
+  name         String
+  category     String
+  /// Reference MRP. The price actually charged comes from PharmacyInventory.
+  price        Float
+  stock        Int     @default(100)
+  description  String?
+  composition  String?
+  manufacturer String?
+
+  schedule             DrugSchedule @default(OTC)
+  teleList             TeleDrugList @default(LIST_O)
+  requiresPrescription Boolean      @default(false)
+
+  createdAt DateTime @default(now())
+
+  inventory  PharmacyInventory[]
+  prescribed PrescribedMedicine[]
+
+  @@index([category])
+  @@index([schedule])
+}
+
+/// Per-pharmacy price and stock. Without this two pharmacies cannot list the
+/// same medicine at different prices, which breaks at the second partner.
+model PharmacyInventory {
+  id           String   @id @default(uuid())
+  pharmacyId   String
+  pharmacy     Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  medicineId   String
+  medicine     Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  price        Float
+  stock        Int      @default(0)
+  /// Alert threshold for the partner app's low-stock notification.
+  reorderLevel Int      @default(10)
+  isActive     Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([pharmacyId, medicineId])
+  @@index([medicineId])
+  @@index([pharmacyId, isActive])
+}
+
+model MedicineOrder {
+  id          String      @id @default(uuid())
+  patientId   String
+  patient     Patient     @relation(fields: [patientId], references: [id])
+  pharmacyId  String?
+  pharmacy    Pharmacy?   @relation(fields: [pharmacyId], references: [id])
+  items       Json
+  totalAmount Float
+  deliveryFee Float       @default(0)
+  status      OrderStatus @default(PLACED)
+  address     String
+  latitude    Float?
+  longitude   Float?
+
+  /// Required before dispatching any prescription-only item.
+  prescriptionId String?
+
+  /// Partner staff today; a dedicated rider app can consume the same field
+  /// later without a migration.
+  assignedAgentUserId String?
+  assignedAgent       User?     @relation("OrderAgent", fields: [assignedAgentUserId], references: [id])
+  acceptedAt          DateTime?
+  dispatchedAt        DateTime?
+  deliveredAt         DateTime?
+  cancelReason        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payment Payment?
+
+  @@index([patientId])
+  @@index([pharmacyId, status])
+  @@index([assignedAgentUserId])
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+model LabPackage {
+  id          String   @id @default(uuid())
+  testName    String
+  category    String
+  /// Reference price; the charged price comes from LabOffering.
+  price       Float
+  sampleType  String
+  fastingReq  Boolean  @default(false)
+  description String?
+  createdAt   DateTime @default(now())
+
+  offerings LabOffering[]
+
+  @@index([category])
+}
+
+/// Per-lab price for a catalogue test, plus what that lab charges to collect
+/// the sample from home.
+model LabOffering {
+  id                String     @id @default(uuid())
+  labPartnerId      String
+  labPartner        LabPartner @relation(fields: [labPartnerId], references: [id], onDelete: Cascade)
+  labPackageId      String
+  labPackage        LabPackage @relation(fields: [labPackageId], references: [id], onDelete: Cascade)
+  price             Float
+  homeCollectionFee Float      @default(0)
+  turnaroundHours   Int        @default(24)
+  isActive          Boolean    @default(true)
+  updatedAt         DateTime   @updatedAt
+
+  @@unique([labPartnerId, labPackageId])
+  @@index([labPackageId])
+  @@index([labPartnerId, isActive])
+}
+
+model LabOrder {
+  id           String         @id @default(uuid())
+  patientId    String
+  patient      Patient        @relation(fields: [patientId], references: [id])
+  labPartnerId String?
+  labPartner   LabPartner?    @relation(fields: [labPartnerId], references: [id])
+  testName     String
+  price        Float
+  status       LabOrderStatus @default(BOOKED)
+  address      String?
+  latitude     Float?
+  longitude    Float?
+
+  /// Legacy plain-URL field, retained only for rows created before reports
+  /// moved into authorised Document storage. New reports use `documents`.
+  reportUrl String?
+
+  scheduledAt         DateTime?
+  assignedAgentUserId String?
+  assignedAgent       User?     @relation("LabOrderAgent", fields: [assignedAgentUserId], references: [id])
+  collectedAt         DateTime?
+  completedAt         DateTime?
+  cancelReason        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents Document[]
+  payment   Payment?
+
+  @@index([patientId])
+  @@index([labPartnerId, status])
+  @@index([assignedAgentUserId])
+}
+
+// ---------------------------------------------------------------------------
+// Emergency
+// ---------------------------------------------------------------------------
+
+model EmergencySOS {
+  id         String          @id @default(uuid())
+  patientId  String
+  patient    Patient         @relation(fields: [patientId], references: [id])
+  latitude   Float
+  longitude  Float
+  status     EmergencyStatus @default(RAISED)
+  note       String?
+  resolvedAt DateTime?
+  createdAt  DateTime        @default(now())
+
+  @@index([status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+model DeviceToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  appId      AppId
+  platform   String
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId, appId])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType @default(GENERIC)
+  title     String
+  body      String
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+// ---------------------------------------------------------------------------
+// Money
+// ---------------------------------------------------------------------------
+
+/// Mirrors the state held by the licensed payment aggregator. The platform
+/// does not custody funds — the aggregator escrows and split-settles, so this
+/// table is a local view for reconciliation and partner-facing statements.
+model Payment {
+  id          String         @id @default(uuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  purpose     PaymentPurpose
+  amount      Float
+  platformFee Float          @default(0)
+  currency    String         @default("INR")
+  status      PaymentStatus  @default(PENDING)
+
+  gateway           String?
+  gatewayOrderId    String?
+  gatewayPaymentId  String?
+  /// Identifier of the settlement leg paid out to the provider.
+  gatewayTransferId String?
+  failureReason     String?
+
+  appointmentId   String?        @unique
+  appointment     Appointment?   @relation(fields: [appointmentId], references: [id])
+  medicineOrderId String?        @unique
+  medicineOrder   MedicineOrder? @relation(fields: [medicineOrderId], references: [id])
+  labOrderId      String?        @unique
+  labOrder        LabOrder?      @relation(fields: [labOrderId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([gatewayOrderId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+/// Append-only record of privileged actions — role grants, application
+/// decisions, prescription issuance, report access. Required evidence for a
+/// system that carries prescriptions and health records.
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id])
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+}

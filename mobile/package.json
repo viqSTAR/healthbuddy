@@ -1,0 +1,24 @@
+{
+  "name": "healthbuddy-mobile",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Health Buddy client apps — patient, doctor and partner — over a shared design system and API client.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "patient": "npm start --workspace @healthbuddy/patient",
+    "doctor": "npm start --workspace @healthbuddy/doctor",
+    "partner": "npm start --workspace @healthbuddy/partner",
+
+    "all": "concurrently -n patient,doctor,partner -c green,blue,magenta \"npm:patient\" \"npm:doctor\" \"npm:partner\"",
+    "all:web": "concurrently -n patient,doctor,partner -c green,blue,magenta \"npm:web --workspace @healthbuddy/patient\" \"npm:web --workspace @healthbuddy/doctor\" \"npm:web --workspace @healthbuddy/partner\"",
+
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "doctor:all": "npm run doctor --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4"
+  }
+}

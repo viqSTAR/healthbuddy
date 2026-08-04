@@ -1,0 +1,53 @@
+{
+  "name": "healthbuddy-backend",
+  "version": "1.0.0",
+  "description": "Health Buddy telehealth backend — Express, Prisma, PostgreSQL, Redis",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --import ./tests/testEnv.mjs --test --test-reporter=spec tests/**/*.test.ts",
+    "test:watch": "npm test -- --watch",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "seed": "tsx prisma/seed.ts",
+    "test:security": "node --import tsx --import ./tests/testEnv.mjs --test --test-reporter=spec tests/security.test.ts"
+  },
+  "keywords": [
+    "healthbuddy",
+    "telehealth",
+    "backend",
+    "express",
+    "typescript",
+    "prisma",
+    "redis"
+  ],
+  "author": "Health Buddy Engineering",
+  "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "ioredis": "^5.11.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.2.0",
+    "prisma": "^5.22.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^26.1.1",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  }
+}
