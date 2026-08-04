@@ -20,6 +20,7 @@ import {
   useAsync,
   type EmergencySOS,
 } from '@healthbuddy/shared';
+import { EmergencyDirectory } from '../../components/EmergencyDirectory';
 
 const CONTROL_NUMBER = '+18005559111';
 
@@ -34,6 +35,8 @@ const CONTROL_NUMBER = '+18005559111';
 export const EmergencySosScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [dispatching, setDispatching] = useState(false);
   const [sos, setSos] = useState<EmergencySOS | null>(null);
+  /** Kept so the directory below can rank services by real distance. */
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const doctors = useAsync(() => fetchDoctors(), []);
 
@@ -54,8 +57,9 @@ export const EmergencySosScreen: React.FC<{ navigation: any }> = ({ navigation }
   const trigger = useCallback(async () => {
     setDispatching(true);
     try {
-      const coords = await resolvePosition();
-      const created = await triggerSOS(coords.latitude, coords.longitude);
+      const position = await resolvePosition();
+      setCoords({ latitude: position.latitude, longitude: position.longitude });
+      const created = await triggerSOS(position.latitude, position.longitude);
       setSos(created);
     } catch (err) {
       Alert.alert(
@@ -146,24 +150,14 @@ export const EmergencySosScreen: React.FC<{ navigation: any }> = ({ navigation }
           <Button label="Call Now" size="md" onPress={call} />
         </Card>
 
-        <View style={styles.serviceRow}>
-          <ServiceTile icon="local_police" label="Police" tint={colors.infoLight} fg={colors.secondary} number="911" />
-          <ServiceTile icon="local_fire_department" label="Fire" tint={colors.dangerLight} fg={colors.error} number="911" />
-          <ServiceTile icon="medical_services" label="Poison" tint={colors.tertiaryFixed} fg={colors.tertiary} number="18002221222" />
-        </View>
-
-        <View>
-          <SectionHeader title="Nearby Facilities" actionLabel="View Full Map" />
-          <View style={styles.mapPlaceholder}>
-            <Icon name="map" size={30} color={colors.secondaryFixedDim} />
-            <View style={styles.mapPill}>
-              <View style={styles.mapDot} />
-              <Text variant="captionSm" weight="medium" color={colors.headingDark}>
-                Hospitals nearby
-              </Text>
-            </View>
-          </View>
-        </View>
+        {/*
+          Real, area-aware numbers replacing the hardcoded US 911 tiles and the
+          decorative map. National numbers always render, so this is never empty.
+        */}
+        <EmergencyDirectory
+          latitude={coords?.latitude}
+          longitude={coords?.longitude}
+        />
 
         <View style={styles.doctorList}>
           <SectionHeader title="Doctors Nearby" />
@@ -195,27 +189,6 @@ export const EmergencySosScreen: React.FC<{ navigation: any }> = ({ navigation }
     </Screen>
   );
 };
-
-const ServiceTile: React.FC<{
-  icon: string;
-  label: string;
-  tint: string;
-  fg: string;
-  number: string;
-}> = ({ icon, label, tint, fg, number }) => (
-  <Card
-    padding={spacing.insetCard}
-    style={styles.serviceTile}
-    onPress={() => Linking.openURL(`tel:${number}`)}
-  >
-    <View style={[styles.serviceIcon, { backgroundColor: tint }]}>
-      <Icon name={icon} size={22} color={fg} />
-    </View>
-    <Text variant="labelMd" weight="medium" color={colors.headingDark}>
-      {label}
-    </Text>
-  </Card>
-);
 
 const styles = StyleSheet.create({
   page: { paddingHorizontal: spacing.insetPage, gap: spacing.lg },

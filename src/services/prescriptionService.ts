@@ -2,7 +2,7 @@ import { Prisma, type AppointmentType, type Medicine } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { recordAudit } from './auditService.js';
-import { notify } from './notificationService.js';
+import { createFulfilmentForPrescription } from './fulfilmentService.js';
 
 export interface MedicineLine {
   /** Catalogue reference. Absent for a drug the doctor typed by hand. */
@@ -12,6 +12,14 @@ export interface MedicineLine {
   frequency: string;
   durationDays?: number;
   instructions?: string;
+}
+
+export interface LabTestLine {
+  /** Catalogue reference; absent means it cannot be auto-booked. */
+  labPackageId?: string;
+  testName: string;
+  instructions?: string;
+  urgent?: boolean;
 }
 
 const prescriptionView = {
@@ -31,6 +39,7 @@ const prescriptionView = {
   doctor: { select: { name: true, specialty: true, qualification: true } },
   patient: { select: { fullName: true, age: true, gender: true } },
   items: true,
+  labTests: true,
 };
 
 /**
@@ -130,6 +139,7 @@ export const createPrescriptionService = async (params: {
   appointmentId: string;
   diagnosis: string;
   medicines: MedicineLine[];
+  labTests?: LabTestLine[];
   notes?: string;
   advice?: string;
   followUpDate?: string;
@@ -213,6 +223,18 @@ export const createPrescriptionService = async (params: {
             instructions: line.instructions ?? null,
           })),
         },
+        ...(params.labTests?.length
+          ? {
+              labTests: {
+                create: params.labTests.map((test) => ({
+                  labPackageId: test.labPackageId ?? null,
+                  testName: test.testName,
+                  instructions: test.instructions ?? null,
+                  urgent: test.urgent ?? false,
+                })),
+              },
+            }
+          : {}),
       },
       select: prescriptionView,
     });
@@ -238,14 +260,14 @@ export const createPrescriptionService = async (params: {
     },
   });
 
-  await notify({
-    userId: appointment.patient.userId,
-    type: 'PRESCRIPTION_ISSUED',
-    title: 'Your prescription is ready',
-    body: `${params.diagnosis} — ${params.medicines.length} medicine(s) prescribed.`,
-    data: { prescriptionId: prescription.id },
-    appId: 'PATIENT',
-  });
+  /**
+   * Price the prescription into a basket the patient can approve in one tap.
+   *
+   * Awaited so the patient's notification names a real total, but it never
+   * throws into this path — a pricing failure must not undo a valid
+   * prescription. It sends its own notification, so there is none here.
+   */
+  await createFulfilmentForPrescription(prescription.id);
 
   return prescription;
 };

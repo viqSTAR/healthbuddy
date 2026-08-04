@@ -19,10 +19,11 @@ export const uploadDocumentHandler = asyncHandler(async (req: UploadRequest, res
   const user = requireUser(req);
   if (!req.file) throw new AppError('No file was uploaded. Send it as the "file" field.', 400);
 
-  const { kind, applicationId, labOrderId } = req.body as {
+  const { kind, applicationId, labOrderId, appointmentId } = req.body as {
     kind: DocumentKind;
     applicationId?: string;
     labOrderId?: string;
+    appointmentId?: string;
   };
 
   const document = await uploadDocumentService({
@@ -33,6 +34,7 @@ export const uploadDocumentHandler = asyncHandler(async (req: UploadRequest, res
     buffer: req.file.buffer,
     ...(applicationId ? { applicationId } : {}),
     ...(labOrderId ? { labOrderId } : {}),
+    ...(appointmentId ? { appointmentId } : {}),
   });
 
   res.status(201).json({ success: true, document });

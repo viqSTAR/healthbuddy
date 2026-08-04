@@ -6,7 +6,7 @@ import {
   getMedicalRecordHandler,
 } from '../controllers/patientController.js';
 import { authenticateJwt, authorizeRoles } from '../middlewares/auth.js';
-import { validate } from '../middlewares/validate.js';
+import { validate, latitudeSchema, longitudeSchema } from '../middlewares/validate.js';
 
 const router = Router();
 
@@ -30,6 +30,15 @@ router.put(
           .optional(),
         emergencyContact: z.string().trim().max(20).nullable().optional(),
         address: z.string().trim().max(300).nullable().optional(),
+        latitude: latitudeSchema.nullable().optional(),
+        longitude: longitudeSchema.nullable().optional(),
+        /**
+         * Comma-separated free text. These drive condition-matched health
+         * content and are what a responder reads first on an SOS, so without
+         * them the targeting has nothing to work with.
+         */
+        allergies: z.string().trim().max(500).nullable().optional(),
+        chronicConditions: z.string().trim().max(500).nullable().optional(),
       })
       .strict(),
   }),

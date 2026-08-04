@@ -16,10 +16,12 @@ import {
   colors,
   createPrescription,
   errorMessage,
+  fetchLabPackages,
   fetchPrescribableMedicines,
   radius,
   spacing,
   useAsync,
+  type LabPackage,
   type PrescribableMedicine,
 } from '@healthbuddy/shared';
 
@@ -30,6 +32,13 @@ interface Line {
   frequency: string;
   durationDays?: number;
   instructions?: string;
+}
+
+interface TestLine {
+  labPackageId: string;
+  testName: string;
+  instructions?: string;
+  urgent?: boolean;
 }
 
 const TELE_LABEL: Record<PrescribableMedicine['teleList'], string> = {
@@ -63,7 +72,12 @@ export const PrescribeScreen: React.FC<{ route: any; navigation: any }> = ({
   const [notes, setNotes] = useState('');
   const [advice, setAdvice] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
+  const [tests, setTests] = useState<TestLine[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Catalogue tests can be auto-booked through the patient's consent flow;
+  // that is why ordering one here matters rather than writing it in the advice.
+  const labCatalogue = useAsync(() => fetchLabPackages(), []);
 
   const addMedicine = (medicine: PrescribableMedicine) => {
     if (!medicine.prescribable) {
@@ -104,12 +118,17 @@ export const PrescribeScreen: React.FC<{ route: any; navigation: any }> = ({
         appointmentId,
         diagnosis: diagnosis.trim(),
         medicines: lines,
+        ...(tests.length ? { labTests: tests } : {}),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
         ...(advice.trim() ? { advice: advice.trim() } : {}),
       });
-      Alert.alert('Prescription issued', 'The patient has been notified.', [
-        { text: 'Done', onPress: () => navigation.popToTop() },
-      ]);
+      Alert.alert(
+        'Prescription issued',
+        'The patient has been sent a priced basket to approve. Nothing is ordered until they do.',
+        [
+          { text: 'Done', onPress: () => navigation.popToTop() },
+        ]
+      );
     } catch (err) {
       Alert.alert('Could not issue prescription', errorMessage(err));
     } finally {
@@ -259,6 +278,72 @@ export const PrescribeScreen: React.FC<{ route: any; navigation: any }> = ({
             </View>
           </Pressable>
         ))}
+      </View>
+
+      <SectionHeader title={`Lab tests (${tests.length})`} />
+      {tests.map((test, index) => (
+        <Card key={test.labPackageId} style={styles.lineCard}>
+          <View style={styles.lineHeader}>
+            <Text variant="labelMd" weight="bold" color={colors.onSurface} style={styles.flex}>
+              {test.testName}
+            </Text>
+            <Pressable
+              onPress={() => setTests((prev) => prev.filter((_, i) => i !== index))}
+              hitSlop={10}
+            >
+              <Icon name="delete" size={18} color={colors.error} />
+            </Pressable>
+          </View>
+          <View style={styles.lineRow}>
+            <Input
+              label="Instructions"
+              value={test.instructions ?? ''}
+              onChangeText={(v) =>
+                setTests((prev) =>
+                  prev.map((t, i) => (i === index ? { ...t, instructions: v } : t))
+                )
+              }
+              placeholder="Fasting sample"
+              containerStyle={styles.flex}
+            />
+          </View>
+          <Pressable
+            onPress={() =>
+              setTests((prev) => prev.map((t, i) => (i === index ? { ...t, urgent: !t.urgent } : t)))
+            }
+          >
+            <Badge
+              label={test.urgent ? 'Urgent' : 'Routine'}
+              tint={test.urgent ? 'danger' : 'neutral'}
+            />
+          </Pressable>
+        </Card>
+      ))}
+
+      <View style={styles.catalogue}>
+        {(labCatalogue.data?.packages ?? [])
+          .filter((pkg: LabPackage) => !tests.some((t) => t.labPackageId === pkg.id))
+          .slice(0, 8)
+          .map((pkg: LabPackage) => (
+            <Pressable
+              key={pkg.id}
+              onPress={() =>
+                setTests((prev) => [...prev, { labPackageId: pkg.id, testName: pkg.testName }])
+              }
+              style={({ pressed }) => [styles.medicine, pressed && styles.pressed]}
+            >
+              <View style={styles.flex}>
+                <Text variant="labelMd" weight="semibold" color={colors.onSurface}>
+                  {pkg.testName}
+                </Text>
+                <Text variant="captionSm" color={colors.captionGray}>
+                  {pkg.sampleType}
+                  {pkg.fastingReq ? ' · fasting required' : ''}
+                </Text>
+              </View>
+              <Icon name="add_circle" size={20} color={colors.primary} />
+            </Pressable>
+          ))}
       </View>
 
       <SectionHeader title="Advice" />

@@ -67,6 +67,37 @@ const LABS = [
   { phone: '+15553000002', name: 'Precision Path Labs', location: 'Delhi', address: '4 Nehru Place', city: 'Delhi', state: 'Delhi', pincode: '110019', reg: 'DL-CLE-2021-1180', nabl: false, markup: 0.9 },
 ];
 
+/**
+ * National emergency numbers, plus a couple of city listings to show how the
+ * area lookup behaves. National entries always surface, so the SOS screen is
+ * never empty even where there are no local records.
+ */
+const EMERGENCY_SERVICES = [
+  { name: 'Ambulance (National)', type: 'AMBULANCE' as const, phone: '108', isNational: true, notes: 'Free emergency ambulance across most states.' },
+  { name: 'Emergency Response (All-in-one)', type: 'AMBULANCE' as const, phone: '112', isNational: true, notes: 'Police, fire and medical from a single number.' },
+  { name: 'Maternity & Child Ambulance', type: 'AMBULANCE' as const, phone: '102', isNational: true, notes: 'Free transport for pregnant women and infants.' },
+  { name: 'National Health Helpline', type: 'POISON_CONTROL' as const, phone: '104', isNational: true, notes: 'Medical advice and poison guidance.' },
+  { name: 'Tele-MANAS Mental Health', type: 'MENTAL_HEALTH' as const, phone: '14416', isNational: true, notes: '24x7 mental health support.' },
+  { name: 'Lifeline Blood Bank', type: 'BLOOD_BANK' as const, phone: '+912226551234', city: 'Mumbai', state: 'Maharashtra', pincode: '400058', latitude: 19.1364, longitude: 72.8296, address: '12 Andheri West' },
+  { name: 'City General Hospital', type: 'HOSPITAL' as const, phone: '+912226559876', city: 'Mumbai', state: 'Maharashtra', pincode: '400076', latitude: 19.1176, longitude: 72.9060, address: 'Powai Main Road' },
+  { name: 'Capital Blood Centre', type: 'BLOOD_BANK' as const, phone: '+911126553311', city: 'Delhi', state: 'Delhi', pincode: '110019', latitude: 28.5494, longitude: 77.2500, address: '4 Nehru Place' },
+];
+
+/**
+ * Condition-matched health content. `matchValues` are compared against the
+ * patient's own chronic conditions, allergies or recent diagnoses — a diabetes
+ * tip reaches diabetics, not everybody.
+ */
+const HEALTH_TIPS = [
+  { title: 'Check your feet daily', body: 'Diabetes can dull sensation in the feet, so a small cut can go unnoticed and become serious. Look at the soles and between the toes once a day, and see a doctor about anything that has not started healing in three days.', category: 'Diabetes', audience: 'CONDITION' as const, matchValues: ['diabetes', 'diabetic'], priority: 10 },
+  { title: 'Salt is the lever that moves blood pressure', body: 'Most of the salt we eat comes from packaged food rather than the shaker. Cutting back on namkeen, pickles and packaged soups usually lowers blood pressure more than cooking with less salt does.', category: 'Hypertension', audience: 'CONDITION' as const, matchValues: ['hypertension', 'blood pressure', 'bp'], priority: 10 },
+  { title: 'Keep a reliever inhaler within reach', body: 'Asthma attacks rarely announce themselves. Keep your reliever inhaler where you can reach it in seconds — bedside, bag, desk — and replace it before it runs out, not after.', category: 'Asthma', audience: 'CONDITION' as const, matchValues: ['asthma'], priority: 10 },
+  { title: 'Finish the whole antibiotic course', body: 'Stopping antibiotics once you feel better lets the strongest bacteria survive, and those are the ones that come back harder to treat. Finish the course your doctor prescribed even if the symptoms have gone.', category: 'Medication', audience: 'DIAGNOSIS' as const, matchValues: ['infection', 'pharyngitis', 'bronchitis', 'uti'], priority: 8 },
+  { title: 'Carry your allergy list', body: 'In an emergency you may not be able to speak for yourself. Keep your allergies written in your phone and in your wallet, so whoever treats you knows what to avoid.', category: 'Allergy', audience: 'ALLERGY' as const, matchValues: ['penicillin', 'sulfa', 'peanut', 'dust', 'pollen'], priority: 9 },
+  { title: 'Drink before you feel thirsty', body: 'Thirst lags behind dehydration, especially in Indian summers. Aim for pale-yellow urine as the marker rather than counting glasses.', category: 'General', audience: 'EVERYONE' as const, matchValues: [], priority: 1 },
+  { title: 'A yearly check-up is cheaper than a diagnosis', body: 'After 40, an annual blood panel catches things like high cholesterol and early diabetes while they are still easy to manage.', category: 'Preventive', audience: 'AGE_RANGE' as const, matchValues: [], minAge: 40, priority: 5 },
+];
+
 const SLOT_TIMES: readonly (readonly [start: string, end: string])[] = [
   ['09:00', '09:30'], ['10:00', '10:30'], ['11:00', '11:30'],
   ['14:00', '14:30'], ['15:30', '16:00'], ['16:30', '17:00'],
@@ -239,6 +270,20 @@ async function main() {
     }
   }
 
+  for (const service of EMERGENCY_SERVICES) {
+    const existing = await prisma.emergencyService.findFirst({
+      where: { name: service.name, phone: service.phone },
+    });
+    if (existing) await prisma.emergencyService.update({ where: { id: existing.id }, data: service });
+    else await prisma.emergencyService.create({ data: service });
+  }
+
+  for (const tip of HEALTH_TIPS) {
+    const existing = await prisma.healthTip.findFirst({ where: { title: tip.title } });
+    if (existing) await prisma.healthTip.update({ where: { id: existing.id }, data: tip });
+    else await prisma.healthTip.create({ data: tip });
+  }
+
   await prisma.user.upsert({
     where: { phoneNumber: '+15559000001' },
     update: { role: 'ADMIN' },
@@ -248,6 +293,8 @@ async function main() {
   const sellable = catalogue.filter((m) => isSellable(m.schedule)).length;
   console.log(`  pharmacies:   ${PHARMACIES.length} (${sellable} stocked items each)`);
   console.log(`  labs:         ${LABS.length} (${packages.length} offerings each)`);
+  console.log(`  emergency:    ${EMERGENCY_SERVICES.length} services`);
+  console.log(`  health tips:  ${HEALTH_TIPS.length}`);
   console.log('  admins:       1');
   console.log('\nSeed complete.');
   console.log('  Admin login:    +15559000001');

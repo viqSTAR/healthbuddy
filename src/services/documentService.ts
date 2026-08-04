@@ -18,7 +18,11 @@ const ALLOWED_MIME = new Set([
  * Documents that are health data rather than business paperwork. These carry
  * the stricter read rules in `canRead`.
  */
-const CLINICAL_KINDS = new Set<DocumentKind>(['LAB_REPORT', 'PRESCRIPTION_IMAGE']);
+const CLINICAL_KINDS = new Set<DocumentKind>([
+  'LAB_REPORT',
+  'PRESCRIPTION_IMAGE',
+  'CONDITION_PHOTO',
+]);
 
 export interface UploadInput {
   ownerUserId: string;
@@ -28,6 +32,7 @@ export interface UploadInput {
   buffer: Buffer;
   applicationId?: string;
   labOrderId?: string;
+  appointmentId?: string;
 }
 
 export const uploadDocumentService = async (input: UploadInput) => {
@@ -64,6 +69,21 @@ export const uploadDocumentService = async (input: UploadInput) => {
     }
   }
 
+  // Condition photos may only be attached by the patient the appointment
+  // belongs to — otherwise anyone could plant images in someone's record.
+  if (input.appointmentId) {
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: input.appointmentId },
+      select: { status: true, patient: { select: { userId: true } } },
+    });
+    if (!appointment || appointment.patient.userId !== input.ownerUserId) {
+      throw notFound('Appointment');
+    }
+    if (appointment.status === 'COMPLETED' || appointment.status === 'CANCELLED') {
+      throw new AppError('This consultation is closed.', 409);
+    }
+  }
+
   const storageKey = buildStorageKey(input.ownerUserId, input.fileName);
   await storage.put(storageKey, input.buffer, input.mimeType);
 
@@ -78,6 +98,7 @@ export const uploadDocumentService = async (input: UploadInput) => {
         sizeBytes: input.buffer.byteLength,
         ...(input.applicationId ? { applicationId: input.applicationId } : {}),
         ...(input.labOrderId ? { labOrderId: input.labOrderId } : {}),
+        ...(input.appointmentId ? { appointmentId: input.appointmentId } : {}),
       },
     });
     return toPublicDocument(document);
@@ -119,6 +140,9 @@ const canRead = async (documentId: string, viewer: JwtPayload): Promise<boolean>
           labPartner: { select: { userId: true } },
         },
       },
+      appointment: {
+        select: { doctorId: true, patient: { select: { userId: true } } },
+      },
     },
   });
 
@@ -135,6 +159,14 @@ const canRead = async (documentId: string, viewer: JwtPayload): Promise<boolean>
     if (doc.labOrder.patient.userId === viewer.userId) return true;
     // The lab fulfilling the order.
     if (doc.labOrder.labPartner?.userId === viewer.userId) return true;
+  }
+
+  if (doc.appointment) {
+    // The patient who attached the photo.
+    if (doc.appointment.patient.userId === viewer.userId) return true;
+    // The doctor consulting on that specific appointment — scoped to this
+    // consultation, not to the patient in general.
+    if (viewer.doctorId && doc.appointment.doctorId === viewer.doctorId) return true;
   }
 
   // A doctor may read a patient's clinical documents only while they have a

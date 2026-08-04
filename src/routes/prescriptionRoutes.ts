@@ -36,6 +36,19 @@ router.post(
         )
         .min(1, 'At least one medicine is required.')
         .max(30),
+      // Tests the doctor wants run. A catalogue id makes them auto-bookable
+      // through the consent flow; free text still records the advice.
+      labTests: z
+        .array(
+          z.object({
+            labPackageId: uuidSchema.optional(),
+            testName: z.string().trim().min(1).max(200),
+            instructions: z.string().trim().max(500).optional(),
+            urgent: z.boolean().optional(),
+          })
+        )
+        .max(20)
+        .optional(),
       notes: z.string().trim().max(2000).optional(),
       advice: z.string().trim().max(2000).optional(),
       followUpDate: z

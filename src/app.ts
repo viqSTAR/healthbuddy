@@ -21,6 +21,8 @@ import documentRoutes from './routes/documentRoutes.js';
 import applicationRoutes from './routes/applicationRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
+import fulfilmentRoutes from './routes/fulfilmentRoutes.js';
+import healthRoutes from './routes/healthRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +71,8 @@ app.use('/api/v1/applications', applicationRoutes);
 app.use('/api/v1/files', documentRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/inventory', inventoryRoutes);
+app.use('/api/v1/fulfilment', fulfilmentRoutes);
+app.use('/api/v1/health-content', healthRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

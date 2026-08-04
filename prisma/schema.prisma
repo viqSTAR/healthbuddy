@@ -126,6 +126,9 @@ enum DocumentKind {
   // Clinical artefacts
   LAB_REPORT
   PRESCRIPTION_IMAGE
+  /// Photo of a visible complaint (rash, wound, swelling), attached to an
+  /// appointment so a doctor can assess without a video call.
+  CONDITION_PHOTO
   PROFILE_PHOTO
 }
 
@@ -185,6 +188,36 @@ enum PaymentPurpose {
   LAB_ORDER
 }
 
+/// Lifecycle of turning a prescription into actual orders.
+///
+/// PENDING_CONSENT is the whole point: a prescription is clinical advice, and
+/// buying what it names is a separate decision the patient has to make. Nothing
+/// is ordered or charged until they approve a priced basket.
+enum FulfilmentStatus {
+  PENDING_CONSENT
+  CONSENTED
+  DECLINED
+  EXPIRED
+}
+
+/// Who a health tip is aimed at. Tips are matched against the patient's own
+/// record, never broadcast indiscriminately.
+enum HealthTipAudience {
+  EVERYONE
+  CONDITION
+  ALLERGY
+  DIAGNOSIS
+  AGE_RANGE
+}
+
+enum EmergencyServiceType {
+  AMBULANCE
+  HOSPITAL
+  BLOOD_BANK
+  POISON_CONTROL
+  MENTAL_HEALTH
+}
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
@@ -240,6 +273,8 @@ model Patient {
   medicineOrders MedicineOrder[]
   labOrders      LabOrder[]
   emergencyLogs  EmergencySOS[]
+  fulfilments    PrescriptionFulfilment[]
+  tipDeliveries  HealthTipDelivery[]
 }
 
 model Doctor {
@@ -433,11 +468,15 @@ model Document {
   labOrderId String?
   labOrder   LabOrder? @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
 
+  appointmentId String?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
 
   @@index([ownerUserId])
   @@index([applicationId])
   @@index([labOrderId])
+  @@index([appointmentId])
 }
 
 // ---------------------------------------------------------------------------
@@ -484,6 +523,8 @@ model Appointment {
 
   prescription Prescription?
   payment      Payment?
+  /// Condition photos the patient attached when booking.
+  documents    Document[]
 
   @@index([patientId])
   @@index([doctorId, status])
@@ -513,10 +554,69 @@ model Prescription {
 
   createdAt DateTime @default(now())
 
-  items PrescribedMedicine[]
+  items      PrescribedMedicine[]
+  labTests   PrescribedLabTest[]
+  fulfilment PrescriptionFulfilment?
 
   @@index([patientId])
   @@index([doctorId])
+}
+
+/// A lab test ordered as part of a prescription, so "doctor advised a blood
+/// test" becomes something the patient can act on in one tap rather than
+/// hunting through the catalogue themselves.
+model PrescribedLabTest {
+  id             String       @id @default(uuid())
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  labPackageId   String?
+  labPackage     LabPackage?  @relation(fields: [labPackageId], references: [id])
+  /// Free text fallback for a test not in the catalogue.
+  testName       String
+  instructions   String?
+  urgent         Boolean      @default(false)
+
+  @@index([prescriptionId])
+  @@index([labPackageId])
+}
+
+/// The consent gate between a prescription and real orders.
+///
+/// Created automatically when a doctor issues a prescription, but it creates
+/// NOTHING on its own. It holds a priced basket — medicines quoted from the
+/// cheapest in-stock pharmacy, tests from the cheapest active lab — and waits.
+/// Only an explicit patient approval turns it into a MedicineOrder and
+/// LabOrders. Ignored, it expires untouched.
+model PrescriptionFulfilment {
+  id             String           @id @default(uuid())
+  prescriptionId String           @unique
+  prescription   Prescription     @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  patientId      String
+  patient        Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  status         FulfilmentStatus @default(PENDING_CONSENT)
+
+  /// Snapshot of the offer, priced at the moment it was made. Kept verbatim so
+  /// the patient is never charged a price different from the one they approved.
+  medicineQuote Json?
+  labQuote      Json?
+  medicineTotal Float @default(0)
+  labTotal      Float @default(0)
+  deliveryFee   Float @default(0)
+
+  consentedAt   DateTime?
+  declinedAt    DateTime?
+  declineReason String?
+  /// Prices go stale; an unanswered offer lapses rather than lingering.
+  expiresAt     DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  medicineOrders MedicineOrder[]
+  labOrders      LabOrder[]
+
+  @@index([patientId, status])
+  @@index([status, expiresAt])
 }
 
 /// Structured prescription line, linked to the catalogue so a patient can order
@@ -605,6 +705,10 @@ model MedicineOrder {
 
   /// Required before dispatching any prescription-only item.
   prescriptionId String?
+  /// Set when the order came from an approved prescription rather than the
+  /// patient adding items to a cart themselves.
+  fulfilmentId   String?
+  fulfilment     PrescriptionFulfilment? @relation(fields: [fulfilmentId], references: [id])
 
   /// Partner staff today; a dedicated rider app can consume the same field
   /// later without a migration.
@@ -640,7 +744,8 @@ model LabPackage {
   description String?
   createdAt   DateTime @default(now())
 
-  offerings LabOffering[]
+  offerings  LabOffering[]
+  prescribed PrescribedLabTest[]
 
   @@index([category])
 }
@@ -680,6 +785,10 @@ model LabOrder {
   /// Legacy plain-URL field, retained only for rows created before reports
   /// moved into authorised Document storage. New reports use `documents`.
   reportUrl String?
+
+  /// Set when the booking came from an approved prescription.
+  fulfilmentId String?
+  fulfilment   PrescriptionFulfilment? @relation(fields: [fulfilmentId], references: [id])
 
   scheduledAt         DateTime?
   assignedAgentUserId String?
@@ -786,6 +895,83 @@ model Payment {
   @@index([userId])
   @@index([status])
   @@index([gatewayOrderId])
+}
+
+// ---------------------------------------------------------------------------
+// Health content & emergency directory
+// ---------------------------------------------------------------------------
+
+/// Educational content matched against a patient's own record.
+///
+/// `audience` plus `matchValues` decide who sees a tip: a diabetes tip reaches
+/// patients whose chronicConditions mention diabetes, not everyone. Health
+/// content that ignores the reader's condition is spam, and people mute it.
+model HealthTip {
+  id          String            @id @default(uuid())
+  title       String
+  body        String
+  category    String
+  audience    HealthTipAudience @default(EVERYONE)
+  /// Lowercased terms matched against the patient's conditions, allergies or
+  /// recent diagnoses. Empty for EVERYONE.
+  matchValues String[]
+  minAge      Int?
+  maxAge      Int?
+  /// Higher wins when several tips match.
+  priority    Int               @default(0)
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  deliveries HealthTipDelivery[]
+
+  @@index([audience, isActive])
+}
+
+/// Records that a tip reached a patient, so the same advice is not sent twice.
+model HealthTipDelivery {
+  id          String    @id @default(uuid())
+  healthTipId String
+  healthTip   HealthTip @relation(fields: [healthTipId], references: [id], onDelete: Cascade)
+  patientId   String
+  patient     Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([healthTipId, patientId])
+  @@index([patientId, createdAt])
+}
+
+/// Ambulance, hospital and blood bank numbers, resolved by area.
+///
+/// Deliberately a directory rather than a dispatch integration: calling an
+/// ambulance is a phone call. The useful thing an app can do in an emergency is
+/// surface the right number instantly, not pretend to send a vehicle.
+model EmergencyService {
+  id       String               @id @default(uuid())
+  name     String
+  type     EmergencyServiceType
+  phone    String
+  altPhone String?
+
+  address    String?
+  city       String?
+  state      String?
+  pincode    String?
+  latitude   Float?
+  longitude  Float?
+  /// Set for a service covering a whole state or the country (e.g. 108).
+  isNational Boolean @default(false)
+
+  is24x7   Boolean @default(true)
+  notes    String?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type, isActive])
+  @@index([city])
+  @@index([isNational])
 }
 
 // ---------------------------------------------------------------------------

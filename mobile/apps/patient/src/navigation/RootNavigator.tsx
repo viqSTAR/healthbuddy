@@ -3,7 +3,13 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { colors, useAuth, OtpVerificationScreen } from '@healthbuddy/shared';
+import {
+  colors,
+  useAuth,
+  OtpVerificationScreen,
+  NotificationsScreen,
+  type AppNotification,
+} from '@healthbuddy/shared';
 
 import { BottomNav } from './BottomNav';
 
@@ -19,6 +25,7 @@ import { BookConsultationScreen } from '../screens/patient/BookConsultationScree
 import { AppointmentConfirmedScreen } from '../screens/patient/AppointmentConfirmedScreen';
 import { MedicalRecordsScreen } from '../screens/patient/MedicalRecordsScreen';
 import { PrescriptionScreen } from '../screens/patient/PrescriptionScreen';
+import { PrescriptionOrderScreen } from '../screens/patient/PrescriptionOrderScreen';
 import { ProfileScreen } from '../screens/patient/ProfileScreen';
 import { EditProfileScreen } from '../screens/patient/EditProfileScreen';
 
@@ -122,6 +129,8 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="BookConsultation" component={BookConsultationScreen} />
             <Stack.Screen name="AppointmentConfirmed" component={AppointmentConfirmedScreen} />
             <Stack.Screen name="Prescription" component={PrescriptionScreen} />
+            {/* The consent gate between a prescription and a real order. */}
+            <Stack.Screen name="PrescriptionOrder" component={PrescriptionOrderScreen} />
             <Stack.Screen name="EditProfile" component={EditProfileScreen} />
 
             <Stack.Screen name="JoinLobby" component={JoinLobbyScreen} />
@@ -131,6 +140,31 @@ export const RootNavigator: React.FC = () => {
               options={{ animation: 'fade' }}
             />
             <Stack.Screen name="ConsultationChat" component={ConsultationChatScreen} />
+
+            {/*
+              Notifications route to the thing they are about. A "prescription
+              ready" alert has to land on the consent screen — otherwise the
+              automation is invisible and the basket expires unread.
+            */}
+            <Stack.Screen name="Notifications">
+              {({ navigation }) => (
+                <NotificationsScreen
+                  navigation={navigation}
+                  onOpen={(notification: AppNotification) => {
+                    const data = notification.data ?? {};
+                    if (typeof data.fulfilmentId === 'string') {
+                      navigation.navigate('PrescriptionOrder', { fulfilmentId: data.fulfilmentId });
+                    } else if (typeof data.orderId === 'string') {
+                      navigation.navigate('OrderTracking', { orderId: data.orderId });
+                    } else if (typeof data.labOrderId === 'string') {
+                      navigation.navigate('LabResult', { orderId: data.labOrderId });
+                    } else if (typeof data.prescriptionId === 'string') {
+                      navigation.navigate('Prescription', { id: data.prescriptionId });
+                    }
+                  }}
+                />
+              )}
+            </Stack.Screen>
           </>
         )}
       </Stack.Navigator>

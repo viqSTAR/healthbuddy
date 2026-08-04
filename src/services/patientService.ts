@@ -11,6 +11,10 @@ const patientView = {
   bloodGroup: true,
   emergencyContact: true,
   address: true,
+  latitude: true,
+  longitude: true,
+  allergies: true,
+  chronicConditions: true,
   createdAt: true,
   user: { select: { phoneNumber: true, role: true } },
 };
@@ -29,6 +33,15 @@ export interface PatientProfileUpdate {
   bloodGroup?: string | null;
   emergencyContact?: string | null;
   address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /**
+   * Free text, comma-separated. Drives condition-matched health content and is
+   * what a responder reads first in an emergency — without these fields the
+   * targeting has nothing to match on.
+   */
+  allergies?: string | null;
+  chronicConditions?: string | null;
 }
 
 /**

@@ -502,6 +502,90 @@ describe('telemedicine prescribing rules', () => {
   });
 });
 
+/**
+ * The consent gate. A prescription is clinical advice; buying what it names is
+ * a separate decision. These lock shut the boundary that keeps it that way.
+ */
+describe('prescription fulfilment consent', () => {
+  test('a patient cannot see another patient\'s prescription order', async () => {
+    const [a, b] = await Promise.all([login(), login()]);
+
+    // `a` has no fulfilments, so any id `b` guesses must 404 rather than 403.
+    const res = await request(app)
+      .get('/api/v1/fulfilment/00000000-0000-4000-8000-000000000000')
+      .set(auth(b.accessToken));
+
+    assert.equal(res.status, 404);
+    assert.ok(a.userId);
+  });
+
+  test('a patient cannot consent on another patient\'s behalf', async () => {
+    const [, b] = await Promise.all([login(), login()]);
+
+    const res = await request(app)
+      .post('/api/v1/fulfilment/00000000-0000-4000-8000-000000000000/consent')
+      .set(auth(b.accessToken))
+      .send({ deliveryAddress: '742 Evergreen Terrace, Springfield' });
+
+    assert.equal(res.status, 404);
+  });
+
+  test('a doctor cannot consent to a fulfilment at all', async () => {
+    const doctor = await loginAs('DOCTOR');
+
+    const res = await request(app)
+      .post('/api/v1/fulfilment/00000000-0000-4000-8000-000000000000/consent')
+      .set(auth(doctor.accessToken))
+      .send({ deliveryAddress: '742 Evergreen Terrace, Springfield' });
+
+    // Consent belongs to the patient alone — the prescriber must never be able
+    // to approve a purchase for them.
+    assert.equal(res.status, 403);
+  });
+
+  test('consent requires a delivery address', async () => {
+    const patient = await login();
+
+    const res = await request(app)
+      .post('/api/v1/fulfilment/00000000-0000-4000-8000-000000000000/consent')
+      .set(auth(patient.accessToken))
+      .send({});
+
+    assert.equal(res.status, 400);
+  });
+
+  test('only an admin can expire stale offers', async () => {
+    const patient = await login();
+    const res = await request(app)
+      .post('/api/v1/fulfilment/expire-stale')
+      .set(auth(patient.accessToken));
+
+    assert.equal(res.status, 403);
+  });
+});
+
+describe('emergency directory', () => {
+  test('emergency numbers are readable without a login', async () => {
+    // Someone in an emergency may have an expired session or a stranger's
+    // phone. Gating an ambulance number behind auth is the wrong trade.
+    const res = await request(app).get('/api/v1/health-content/emergency-services');
+
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body.national));
+    assert.ok(res.body.national.length > 0, 'seed data required — run `npm run seed`');
+  });
+
+  test('a patient cannot edit the emergency directory', async () => {
+    const patient = await login();
+    const res = await request(app)
+      .put('/api/v1/health-content/emergency-services')
+      .set(auth(patient.accessToken))
+      .send({ name: 'Fake Ambulance', type: 'AMBULANCE', phone: '+10000000000' });
+
+    assert.equal(res.status, 403);
+  });
+});
+
 describe('document access', () => {
   test('an unsigned request for a document is rejected', async () => {
     const res = await request(app).get(

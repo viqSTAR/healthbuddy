@@ -5,6 +5,7 @@ import {
   getPrescriptionByIdService,
   getPrescribableMedicinesService,
   type MedicineLine,
+  type LabTestLine,
 } from '../services/prescriptionService.js';
 import {
   asyncHandler,
@@ -18,20 +19,23 @@ export const createPrescriptionHandler = asyncHandler(
   async (req: AuthenticatedRequest, res: Response) => {
     const doctorId = requireDoctorId(req);
 
-    const { appointmentId, diagnosis, medicines, notes, advice, followUpDate } = req.body as {
-      appointmentId: string;
-      diagnosis: string;
-      medicines: MedicineLine[];
-      notes?: string;
-      advice?: string;
-      followUpDate?: string;
-    };
+    const { appointmentId, diagnosis, medicines, labTests, notes, advice, followUpDate } =
+      req.body as {
+        appointmentId: string;
+        diagnosis: string;
+        medicines: MedicineLine[];
+        labTests?: LabTestLine[];
+        notes?: string;
+        advice?: string;
+        followUpDate?: string;
+      };
 
     const prescription = await createPrescriptionService({
       doctorId,
       appointmentId,
       diagnosis,
       medicines,
+      ...(labTests?.length ? { labTests } : {}),
       ...(notes ? { notes } : {}),
       ...(advice ? { advice } : {}),
       ...(followUpDate ? { followUpDate } : {}),

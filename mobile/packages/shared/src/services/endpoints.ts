@@ -61,6 +61,8 @@ export interface Appointment {
   slot?: { date: string; startTime: string; endTime: string };
   doctor?: { id: string; name: string; specialty: string; consultationFee: number };
   patient?: { id: string; fullName: string };
+  /** Condition photos the patient attached when booking. */
+  documents?: DocumentRef[];
 }
 
 export interface Medicine {
@@ -200,6 +202,8 @@ export interface PatientProfile {
   bloodGroup: string | null;
   emergencyContact: string | null;
   address: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   allergies?: string | null;
   chronicConditions?: string | null;
   createdAt: string;
@@ -269,6 +273,8 @@ export type DocumentKind =
   | 'PREMISES_PHOTO'
   | 'LAB_REPORT'
   | 'PRESCRIPTION_IMAGE'
+  /** Photo of a visible complaint, attached to an appointment. */
+  | 'CONDITION_PHOTO'
   | 'PROFILE_PHOTO';
 
 export interface DocumentRef {
@@ -611,6 +617,13 @@ export const createPrescription = async (payload: {
     durationDays?: number;
     instructions?: string;
   }[];
+  /** A catalogue id makes a test auto-bookable through the consent flow. */
+  labTests?: {
+    labPackageId?: string;
+    testName: string;
+    instructions?: string;
+    urgent?: boolean;
+  }[];
   notes?: string;
   advice?: string;
   followUpDate?: string;
@@ -714,7 +727,7 @@ export interface UploadTarget {
 export const uploadDocument = async (
   file: UploadTarget,
   kind: DocumentKind,
-  link?: { applicationId?: string; labOrderId?: string }
+  link?: { applicationId?: string; labOrderId?: string; appointmentId?: string }
 ) => {
   const form = new FormData();
   form.append('file', {
@@ -725,6 +738,7 @@ export const uploadDocument = async (
   form.append('kind', kind);
   if (link?.applicationId) form.append('applicationId', link.applicationId);
   if (link?.labOrderId) form.append('labOrderId', link.labOrderId);
+  if (link?.appointmentId) form.append('appointmentId', link.appointmentId);
 
   const res = await api.post<{ document: DocumentRef }>('/files', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
@@ -774,6 +788,140 @@ export const markNotificationRead = async (id: string) =>
 
 export const markAllNotificationsRead = async () =>
   (await api.post('/notifications/read-all')).data;
+
+/* ---------- Prescription fulfilment (the consent flow) ---------- */
+
+export type FulfilmentStatus = 'PENDING_CONSENT' | 'CONSENTED' | 'DECLINED' | 'EXPIRED';
+
+export interface MedicineQuoteLine {
+  medicineId: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  durationDays: number | null;
+  quantity: number;
+  unitPrice: number;
+  itemTotal: number;
+  pharmacyId: string;
+  pharmacyName: string;
+  requiresPrescription: boolean;
+  /** Present when the item cannot be ordered — shown, never silently dropped. */
+  unavailableReason?: string;
+}
+
+export interface LabQuoteLine {
+  labPackageId: string | null;
+  testName: string;
+  instructions: string | null;
+  urgent: boolean;
+  price: number | null;
+  homeCollectionFee: number;
+  labPartnerId: string | null;
+  labPartnerName: string | null;
+  unavailableReason?: string;
+}
+
+export interface Fulfilment {
+  id: string;
+  prescriptionId: string;
+  status: FulfilmentStatus;
+  medicines: MedicineQuoteLine[];
+  labTests: LabQuoteLine[];
+  medicineTotal: number;
+  labTotal: number;
+  deliveryFee: number;
+  grandTotal: number;
+  expiresAt: string;
+  consentedAt: string | null;
+  declinedAt: string | null;
+  declineReason: string | null;
+  createdAt: string;
+  diagnosis: string;
+  doctorName: string;
+}
+
+export const fetchMyFulfilments = async () =>
+  (await api.get<{ fulfilments: Fulfilment[] }>('/fulfilment/mine')).data.fulfilments;
+
+export const fetchFulfilment = async (id: string) =>
+  (await api.get<{ fulfilment: Fulfilment }>(`/fulfilment/${id}`)).data.fulfilment;
+
+/**
+ * Approve a prescription order.
+ *
+ * No prices are sent — the server charges from the stored quote, so what the
+ * patient approved is exactly what they pay.
+ */
+export const consentToFulfilment = async (
+  id: string,
+  payload: {
+    acceptMedicineIds?: string[];
+    acceptLabPackageIds?: string[];
+    deliveryAddress: string;
+    latitude?: number;
+    longitude?: number;
+  }
+) =>
+  (
+    await api.post<{ medicineOrderId: string | null; labOrderIds: string[]; message: string }>(
+      `/fulfilment/${id}/consent`,
+      payload
+    )
+  ).data;
+
+export const declineFulfilment = async (id: string, reason?: string) =>
+  (await api.post(`/fulfilment/${id}/decline`, { reason })).data;
+
+/* ---------- Health content & emergency directory ---------- */
+
+export type EmergencyServiceType =
+  | 'AMBULANCE'
+  | 'HOSPITAL'
+  | 'BLOOD_BANK'
+  | 'POISON_CONTROL'
+  | 'MENTAL_HEALTH';
+
+export interface EmergencyServiceEntry {
+  id: string;
+  name: string;
+  type: EmergencyServiceType;
+  phone: string;
+  altPhone: string | null;
+  address: string | null;
+  city: string | null;
+  isNational: boolean;
+  is24x7: boolean;
+  notes: string | null;
+  distanceKm: number | null;
+}
+
+/** Deliberately unauthenticated — an emergency number behind a login is useless. */
+export const fetchEmergencyServices = async (params?: {
+  latitude?: number;
+  longitude?: number;
+  city?: string;
+  type?: EmergencyServiceType;
+}) =>
+  (
+    await api.get<{ nearby: EmergencyServiceEntry[]; national: EmergencyServiceEntry[] }>(
+      '/health-content/emergency-services',
+      { params }
+    )
+  ).data;
+
+export interface HealthTipEntry {
+  id: string;
+  title: string;
+  body: string;
+  category: string;
+  receivedAt: string;
+}
+
+export const fetchMyHealthTips = async () =>
+  (await api.get<{ tips: HealthTipEntry[] }>('/health-content/tips/mine')).data.tips;
+
+export const refreshHealthTips = async () =>
+  (await api.post<{ delivered: number }>('/health-content/tips/refresh')).data;
 
 /* ---------- Admin ---------- */
 

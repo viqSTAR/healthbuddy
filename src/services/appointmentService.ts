@@ -122,11 +122,27 @@ export const getPatientAppointmentsService = (patientId: string) =>
     orderBy: { createdAt: 'desc' },
   });
 
-export const getDoctorAppointmentsService = (doctorId: string) =>
+/**
+ * The doctor's queue.
+ *
+ * Bounded deliberately: an unbounded findMany here returned every appointment a
+ * doctor had ever had, on every dashboard load. Cancelled and long-completed
+ * consults are history, not a working queue.
+ */
+export const getDoctorAppointmentsService = (doctorId: string, limit = 100) =>
   prisma.appointment.findMany({
     where: { doctorId },
-    select: appointmentView,
+    select: {
+      ...appointmentView,
+      // Condition photos the patient attached; the doctor of THIS appointment
+      // is authorised to open them.
+      documents: {
+        where: { kind: 'CONDITION_PHOTO' },
+        select: { id: true, fileName: true, mimeType: true, sizeBytes: true, createdAt: true },
+      },
+    },
     orderBy: { createdAt: 'desc' },
+    take: limit,
   });
 
 /** Cancels an appointment and returns the slot to the pool. */

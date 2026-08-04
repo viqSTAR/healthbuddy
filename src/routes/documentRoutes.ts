@@ -38,6 +38,7 @@ const documentKinds = [
   'PREMISES_PHOTO',
   'LAB_REPORT',
   'PRESCRIPTION_IMAGE',
+  'CONDITION_PHOTO',
   'PROFILE_PHOTO',
 ] as const;
 
@@ -61,6 +62,7 @@ router.post(
       kind: z.enum(documentKinds),
       applicationId: uuidSchema.optional(),
       labOrderId: uuidSchema.optional(),
+      appointmentId: uuidSchema.optional(),
     }),
   }),
   uploadDocumentHandler
