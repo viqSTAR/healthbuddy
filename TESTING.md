@@ -38,22 +38,74 @@ would lose every licence and lab report on the next redeploy.
 
 ### Switching on Cloudflare R2
 
+**1. Create the bucket.** Cloudflare dashboard → **R2** → *Create bucket*. Name
+it something like `healthbuddy-documents` and pick a location near your users
+(APAC for India). Leave the public `r2.dev` URL **off** — more on that below.
+
+**2. Create an API token.** R2 → *Manage API Tokens* → *Create API token*:
+
+| Field | Value |
+| --- | --- |
+| Permissions | **Object Read & Write** |
+| Specify bucket | your bucket only, not "all buckets" |
+| TTL | leave as forever, or rotate on a schedule |
+
+It shows an **Access Key ID** and a **Secret Access Key** once. Copy both now.
+
+**3. Find your account id.** It is in the R2 overview page, and in the endpoint
+Cloudflare shows you: `https://<account-id>.r2.cloudflarestorage.com`.
+
+**4. Put it in `.env`.**
+
 ```
 STORAGE_DRIVER=r2
-R2_ACCOUNT_ID=<your Cloudflare account id>
-S3_BUCKET=<bucket name>
-S3_ACCESS_KEY_ID=<from an R2 API token>
-S3_SECRET_ACCESS_KEY=<from the same token>
+R2_ACCOUNT_ID=<the account id from step 3>
+S3_BUCKET=<your bucket name>
+S3_ACCESS_KEY_ID=<Access Key ID from step 2>
+S3_SECRET_ACCESS_KEY=<Secret Access Key from step 2>
 ```
 
-Create the token under **R2 → Manage API Tokens** with *Object Read & Write* on
-that bucket. Two things to get right:
+Leave `S3_REGION` and `S3_ENDPOINT` blank — both are derived from the account
+id. The app refuses to boot if any of the five is missing, rather than starting
+up and losing files later.
 
-- **Keep the bucket private.** Do not enable the `r2.dev` public URL. Reads are
-  authorised per request and streamed through the API; a public bucket only
-  creates a way to reach a patient's lab report with no login at all.
-- Nothing else changes. R2 speaks the S3 API, so the same driver serves both;
-  only the endpoint and region differ, and both are derived from the account id.
+**5. Prove it works.**
+
+```bash
+npm run storage:check
+```
+
+It writes an object, reads it back byte for byte, checks the traversal guards,
+confirms the bucket is not publicly readable, then deletes it. Run this before
+a real licence document depends on it — a driver that can write but not read is
+worse than one that fails outright, because the failure only surfaces when
+someone asks for their lab report.
+
+**6. Restart the backend** and upload a lab report as the lab partner, then open
+it as the patient. The object appears in your bucket; the patient never sees a
+bucket URL.
+
+#### Keep the bucket private
+
+Do **not** enable the `r2.dev` public URL, and do not attach a custom domain to
+this bucket. `npm run storage:check` fails loudly if it finds one.
+
+Reads go through the API: `documentService` authorises the caller, then streams
+the bytes. Nothing hands out a bucket URL. A public bucket would make every
+stored lab report and drug licence readable by anyone who obtains or guesses
+the link — with no login, forever, including after the patient deletes their
+account.
+
+R2 charges nothing for egress, so streaming through the API costs no more than
+a public URL would.
+
+#### Migrating what is already in `./uploads`
+
+Files written by the local driver are not copied automatically. In development
+the simplest path is to re-upload the few documents you care about. If you have
+real data, upload the directory with `rclone` or the Cloudflare dashboard,
+preserving the exact key paths (`<userId>/<uuid><ext>`) — `Document.storageKey`
+in the database points at them.
 
 ---
 

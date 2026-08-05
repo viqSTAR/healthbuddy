@@ -14,6 +14,7 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
+    "storage:check": "tsx scripts/checkStorage.ts",
     "test:security": "node --import tsx --import ./tests/testEnv.mjs --test --test-reporter=spec tests/security.test.ts"
   },
   "keywords": [
