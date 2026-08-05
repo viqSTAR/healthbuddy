@@ -2,6 +2,7 @@ import { Prisma, type OrderStatus } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
+import { refundForTargetService } from './paymentService.js';
 
 export const getMedicinesService = async (category?: string, query?: string, page = 1, limit = 20) => {
   const where: Prisma.MedicineWhereInput = {
@@ -99,19 +100,45 @@ export const placeMedicineOrderService = async (
 export const getPatientMedicineOrdersService = (patientId: string) =>
   prisma.medicineOrder.findMany({ where: { patientId }, orderBy: { createdAt: 'desc' } });
 
-/** Scoped to one pharmacy — never the whole platform's orders. */
-export const getPharmacyOrderQueueService = (pharmacyId: string, status?: OrderStatus) =>
-  prisma.medicineOrder.findMany({
+/**
+ * Scoped to one pharmacy — never the whole platform's orders.
+ *
+ * PENDING_PAYMENT is excluded unconditionally. A pharmacy that can see an
+ * unpaid order will pick and pack it, and the platform then owes for stock
+ * dispensed against a payment that may never arrive.
+ */
+export const getPharmacyOrderQueueService = async (
+  pharmacyId: string,
+  status?: OrderStatus,
+  limit = 100
+) => {
+  const paymentView = { select: { method: true, status: true, amount: true } };
+
+  const orders = await prisma.medicineOrder.findMany({
     where: {
       OR: [{ pharmacyId }, { pharmacyId: null }],
-      ...(status ? { status } : {}),
+      ...(status && status !== 'PENDING_PAYMENT'
+        ? { status }
+        : { status: { not: 'PENDING_PAYMENT' } }),
     },
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    take: Math.min(limit, 200),
     include: {
       patient: { select: { id: true, fullName: true, emergencyContact: true } },
       assignedAgent: { select: { id: true, phoneNumber: true } },
+      payment: paymentView,
+      // An order that came from an approved prescription is paid for as part
+      // of the whole basket, so its payment hangs off the fulfilment rather
+      // than the order. Without this the shop is never told to collect cash.
+      fulfilment: { select: { payment: paymentView } },
     },
   });
+
+  return orders.map(({ fulfilment, ...order }) => ({
+    ...order,
+    payment: order.payment ?? fulfilment?.payment ?? null,
+  }));
+};
 
 export const getPatientOrderByIdService = async (orderId: string, patientId: string) => {
   const order = await prisma.medicineOrder.findUnique({ where: { id: orderId } });
@@ -194,6 +221,12 @@ export const updateOrderStatusService = async (
     throw notFound('Order');
   }
 
+  // An unpaid order is not the pharmacy's to advance. It becomes PLACED when
+  // the payment clears — nothing else may move it out of this state.
+  if (order.status === 'PENDING_PAYMENT') {
+    throw conflict('This order has not been paid for yet.');
+  }
+
   // A prescription-only order must not leave the shop without one on file.
   if (status === 'DISPATCHED') {
     const items = (order.items as unknown as { medicineId: string }[]) ?? [];
@@ -223,11 +256,25 @@ export const updateOrderStatusService = async (
     },
   });
 
+  // Cancelling is what triggers a refund. Deliberately after the status write:
+  // the order is cancelled either way, and a gateway failure must not leave it
+  // stuck in limbo. refundForTargetService logs and returns rather than throws.
+  let refund = { refunded: false, amount: 0 };
+  if (status === 'CANCELLED') {
+    refund = await refundForTargetService(
+      order.fulfilmentId ? { fulfilmentId: order.fulfilmentId } : { medicineOrderId: order.id },
+      cancelReason ?? 'Order cancelled by the pharmacy.'
+    );
+  }
+
   await notify({
     userId: order.patient.userId,
     type: 'ORDER_STATUS_CHANGED',
     title: 'Order update',
-    body: `Your order is now ${status.toLowerCase()}.`,
+    body:
+      status === 'CANCELLED' && refund.refunded
+        ? `Your order was cancelled. ₹${refund.amount.toFixed(2)} is being refunded.`
+        : `Your order is now ${status.toLowerCase()}.`,
     data: { orderId: order.id, status },
     appId: 'PATIENT',
   });

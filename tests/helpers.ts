@@ -107,12 +107,30 @@ export const cleanupTestUsers = async () => {
       where: { id: { in: appts.map((a) => a.slotId) } },
       data: { status: 'AVAILABLE' },
     });
+    // Payments reference orders, so they have to go first.
+    await prisma.payment.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.medicineOrder.deleteMany({ where: { patientId: { in: patientIds } } });
     await prisma.labOrder.deleteMany({ where: { patientId: { in: patientIds } } });
     await prisma.emergencySOS.deleteMany({ where: { patientId: { in: patientIds } } });
   }
 
   if (userIds.length) await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+};
+
+/**
+ * A medicine that can actually be bought right now.
+ *
+ * `findFirst()` with no filter returns rows in arbitrary order and can land on
+ * a controlled drug or one whose stock earlier runs already consumed — which
+ * fails the order with a 409 that has nothing to do with what is under test.
+ */
+export const anOrderableMedicine = async () => {
+  const medicine = await prisma.medicine.findFirst({
+    where: { stock: { gte: 5 }, schedule: 'OTC' },
+    orderBy: { stock: 'desc' },
+  });
+  if (!medicine) throw new Error('No OTC medicine in stock — run `npm run seed`.');
+  return medicine;
 };
 
 /** Grabs a seeded doctor plus one free slot. */

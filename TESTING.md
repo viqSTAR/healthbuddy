@@ -26,10 +26,34 @@ Make sure `.env` has:
 NODE_ENV=development
 EXPOSE_DEV_OTP=true     # returns the OTP in the response — dev only
 SMS_PROVIDER=mock
+PAYMENT_PROVIDER=mock   # simulates a gateway, signatures and all
+VIDEO_PROVIDER=mock     # call shell only, until you configure a real one
+STORAGE_DRIVER=local
 ```
 
-`EXPOSE_DEV_OTP=true` is what lets you log in without real SMS. It is rejected
-outright when `NODE_ENV=production`.
+`EXPOSE_DEV_OTP=true` is what lets you log in without real SMS. Every one of
+these `mock` values is rejected outright when `NODE_ENV=production` — `mock`
+payments would mark orders paid without collecting anything, and `local` storage
+would lose every licence and lab report on the next redeploy.
+
+### Switching on Cloudflare R2
+
+```
+STORAGE_DRIVER=r2
+R2_ACCOUNT_ID=<your Cloudflare account id>
+S3_BUCKET=<bucket name>
+S3_ACCESS_KEY_ID=<from an R2 API token>
+S3_SECRET_ACCESS_KEY=<from the same token>
+```
+
+Create the token under **R2 → Manage API Tokens** with *Object Read & Write* on
+that bucket. Two things to get right:
+
+- **Keep the bucket private.** Do not enable the `r2.dev` public URL. Reads are
+  authorised per request and streamed through the API; a public bucket only
+  creates a way to reach a patient's lab report with no login at all.
+- Nothing else changes. R2 speaks the S3 API, so the same driver serves both;
+  only the endpoint and region differ, and both are derived from the account id.
 
 ---
 
@@ -38,7 +62,7 @@ outright when `NODE_ENV=production`.
 Run these before touching a phone — they catch most breakage in seconds.
 
 ```bash
-# Backend: 38 regression tests against a live database
+# Backend: 59 regression tests against a live database
 npm test
 
 # Backend types
@@ -231,7 +255,65 @@ different price for the same medicine. Both are valid simultaneously.
 Then check the access control: the report is served only to that patient, the
 lab that produced it, a treating doctor, or an admin. It is **not** a public URL.
 
-### E. Admin panel
+### E. Paying for a prescription basket
+
+Everything below works with **no gateway account**: `PAYMENT_PROVIDER=mock`
+simulates a real gateway, signatures and all.
+
+1. Follow flow **B** so a doctor issues a prescription — add a **lab test** to it
+   as well as medicines.
+2. **Patient app** → the "prescription is ready to order" notification → it opens
+   the consent screen with a priced basket.
+3. Untick anything you already have. The total updates live.
+4. Choose **UPI** → **Pay ₹… and order**.
+5. Before the payment clears, look at the **partner app** → the order is **not
+   there**. That is the point: a shop must never pick and pack an order nobody
+   has paid for.
+6. The mock gateway settles immediately, then the order appears in the pharmacy
+   queue and the booking in the lab queue.
+
+Now try **cash on delivery**: repeat with **COD** selected. The order goes
+straight to the pharmacy queue, tagged *Collect ₹… on delivery*. Marking it
+delivered settles the cash in the same step.
+
+Then try a **refund**: as the pharmacy, cancel a prepaid order. The patient's
+payment flips to `REFUNDED` and they are notified.
+
+Partner earnings: *Profile → Earnings* in the partner or doctor app shows each
+settlement leg, **net of commission**.
+
+### F. Video consultation
+
+Out of the box `VIDEO_PROVIDER=mock`, so *Join* shows the call shell and says
+plainly that no transport is configured — it does not pretend to be connected.
+
+For a real call, free, in a few minutes:
+
+```bash
+# Option 1 — Jitsi. No account, but meet.jit.si makes the FIRST participant
+# sign in with Google/GitHub/Facebook. Point at your own host to avoid that.
+VIDEO_PROVIDER=jitsi
+
+# Option 2 — Daily. Free key, ~10,000 participant-minutes a month, and rooms
+# are created private so the URL alone will not get anyone in.
+VIDEO_PROVIDER=daily
+DAILY_API_KEY=...
+DAILY_SUBDOMAIN=your-subdomain
+```
+
+Then: doctor app → the appointment → **Start video consultation**. The room
+opens in your browser, which is why this works in Expo Go — no native build
+needed. The patient taps *Join now* and lands in the same room.
+
+Worth checking:
+
+- Joining more than `VIDEO_JOIN_LEAD_MINUTES` early is refused, with the time it
+  opens
+- A patient who is not on the appointment gets a 404, not a 403
+- The room id is 128 bits of randomness, never the appointment id — on every
+  hosted video service a room name is a bearer credential
+
+### G. Admin panel
 
 - *Overview* — live counts, pending queue, licences expiring within 60 days
 - *Users* — suspend a partner and watch their shop deactivate

@@ -5,6 +5,7 @@
  */
 import { test, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import {
   app,
   prisma,
@@ -15,8 +16,10 @@ import {
   uniquePhone,
   cleanupTestUsers,
   anAvailableSlot,
+  anOrderableMedicine,
 } from './helpers.js';
 import { cacheStore } from '../src/config/redis.js';
+import { env } from '../src/config/env.js';
 
 after(async () => {
   await cleanupTestUsers();
@@ -105,8 +108,7 @@ describe('cross-patient data isolation', () => {
 
   test("patient B cannot read patient A's medicine order by id", async () => {
     const [a, b] = await Promise.all([login(), login()]);
-    const medicine = await prisma.medicine.findFirst();
-    assert.ok(medicine, 'seed data required');
+    const medicine = await anOrderableMedicine();
 
     const created = await request(app)
       .post('/api/v1/pharmacy/orders')
@@ -125,8 +127,7 @@ describe('cross-patient data isolation', () => {
 
   test('a patient only sees their own orders in the list endpoint', async () => {
     const [a, b] = await Promise.all([login(), login()]);
-    const medicine = await prisma.medicine.findFirst();
-    assert.ok(medicine);
+    const medicine = await anOrderableMedicine();
 
     await request(app)
       .post('/api/v1/pharmacy/orders')
@@ -258,8 +259,7 @@ describe('input validation', () => {
 
   test('a negative order quantity is rejected', async () => {
     const patient = await login();
-    const medicine = await prisma.medicine.findFirst();
-    assert.ok(medicine);
+    const medicine = await anOrderableMedicine();
 
     const res = await request(app)
       .post('/api/v1/pharmacy/orders')
@@ -583,6 +583,167 @@ describe('emergency directory', () => {
       .send({ name: 'Fake Ambulance', type: 'AMBULANCE', phone: '+10000000000' });
 
     assert.equal(res.status, 403);
+  });
+});
+
+describe('payments', () => {
+  const NONEXISTENT = '00000000-0000-4000-8000-000000000000';
+
+  test('a patient cannot check out an order that is not theirs', async () => {
+    const patient = await login();
+
+    const res = await request(app)
+      .post('/api/v1/payments/checkout')
+      .set(auth(patient.accessToken))
+      .send({ purpose: 'MEDICINE_ORDER', targetId: NONEXISTENT, method: 'UPI' });
+
+    // 404, not 403 — a 403 would confirm the order exists.
+    assert.equal(res.status, 404);
+  });
+
+  test('checkout takes no amount from the client', async () => {
+    const patient = await login();
+
+    const res = await request(app)
+      .post('/api/v1/payments/checkout')
+      .set(auth(patient.accessToken))
+      .send({ purpose: 'MEDICINE_ORDER', targetId: NONEXISTENT, method: 'UPI', amount: 1 });
+
+    // The extra field is ignored, not honoured: the request still fails on the
+    // order lookup rather than being priced at ₹1.
+    assert.equal(res.status, 404);
+  });
+
+  test('a payment cannot be confirmed with a forged signature', async () => {
+    const patient = await login();
+
+    const res = await request(app)
+      .post('/api/v1/payments/confirm')
+      .set(auth(patient.accessToken))
+      .send({
+        orderId: 'order_mock_doesnotexist',
+        paymentId: 'pay_mock_forged',
+        signature: 'f'.repeat(64),
+      });
+
+    // No such payment for this user. The important property is that no code
+    // path marks anything PAID without a signature this server computed.
+    assert.equal(res.status, 404);
+  });
+
+  test('an unsigned webhook is refused', async () => {
+    const res = await request(app)
+      .post('/api/v1/payments/webhook')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify({ event: 'payment.captured', orderId: 'order_x' })));
+
+    // Without this check anyone could post "payment succeeded" and release an
+    // unpaid order to a pharmacy.
+    assert.equal(res.status, 403);
+  });
+
+  test('a webhook with a wrong signature is refused', async () => {
+    const res = await request(app)
+      .post('/api/v1/payments/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-webhook-signature', 'a'.repeat(64))
+      .send(Buffer.from(JSON.stringify({ event: 'payment.captured', orderId: 'order_x' })));
+
+    assert.equal(res.status, 403);
+  });
+
+  test('a correctly signed webhook is accepted and verified against the raw body', async () => {
+    const body = JSON.stringify({
+      event: 'payment.captured',
+      id: `evt_${Date.now()}`,
+      orderId: 'order_mock_nothing_matches_this',
+    });
+    const signature = createHmac('sha256', env.JWT_ACCESS_SECRET).update(body).digest('hex');
+
+    // Sent as a string, exactly as a gateway sends it. Passing a Buffer here
+    // would have superagent re-encode it as {"type":"Buffer","data":[...]},
+    // which is a different set of bytes and would fail this signature — which
+    // is precisely the property the raw-body mounting exists to preserve.
+    const res = await request(app)
+      .post('/api/v1/payments/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-webhook-signature', signature)
+      .send(body);
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.matched, false);
+  });
+
+  test('a patient cannot read a partner earnings statement', async () => {
+    const patient = await login();
+    const res = await request(app).get('/api/v1/payments/earnings').set(auth(patient.accessToken));
+    assert.equal(res.status, 403);
+  });
+
+  test('a pharmacy cannot settle cash on an order it does not hold', async () => {
+    const pharmacy = await loginAs('PHARMACY');
+
+    const res = await request(app)
+      .post(`/api/v1/payments/cod/${NONEXISTENT}/collected`)
+      .set(auth(pharmacy.accessToken));
+
+    assert.equal(res.status, 404);
+  });
+
+  test('a patient cannot settle their own cash-on-delivery debt', async () => {
+    const patient = await login();
+
+    const res = await request(app)
+      .post(`/api/v1/payments/cod/${NONEXISTENT}/collected`)
+      .set(auth(patient.accessToken));
+
+    assert.equal(res.status, 403);
+  });
+
+  test('a patient cannot read another user\'s payment', async () => {
+    const [, b] = await Promise.all([login(), login()]);
+    const res = await request(app)
+      .get(`/api/v1/payments/${NONEXISTENT}`)
+      .set(auth(b.accessToken));
+    assert.equal(res.status, 404);
+  });
+});
+
+describe('video consultation access', () => {
+  const NONEXISTENT = '00000000-0000-4000-8000-000000000000';
+
+  test('joining a consultation requires a session', async () => {
+    const res = await request(app).post(`/api/v1/video/${NONEXISTENT}/join`);
+    assert.equal(res.status, 401);
+  });
+
+  test('a stranger cannot join a consultation they are not part of', async () => {
+    const stranger = await login();
+    const res = await request(app)
+      .post(`/api/v1/video/${NONEXISTENT}/join`)
+      .set(auth(stranger.accessToken));
+
+    // 404 rather than 403: confirming the appointment exists is itself a
+    // disclosure about someone else's care.
+    assert.equal(res.status, 404);
+  });
+
+  test('a patient cannot end a consultation', async () => {
+    const patient = await login();
+    const res = await request(app)
+      .post(`/api/v1/video/${NONEXISTENT}/end`)
+      .set(auth(patient.accessToken));
+
+    assert.equal(res.status, 403);
+  });
+
+  test('a doctor cannot end a consultation that is not theirs', async () => {
+    const doctor = await loginAs('DOCTOR');
+    const res = await request(app)
+      .post(`/api/v1/video/${NONEXISTENT}/end`)
+      .set(auth(doctor.accessToken));
+
+    assert.equal(res.status, 404);
   });
 });
 

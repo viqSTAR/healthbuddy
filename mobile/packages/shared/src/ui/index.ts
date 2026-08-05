@@ -17,6 +17,7 @@ export { DocumentUploader } from './DocumentUploader';
 export { VerificationStatus } from './VerificationStatus';
 export { OtpVerificationScreen } from './OtpVerificationScreen';
 export { NotificationsScreen } from './NotificationsScreen';
+export { EarningsScreen } from './EarningsScreen';
 
 export type { DocumentUploaderProps } from './DocumentUploader';
 export type { OtpVerificationScreenProps } from './OtpVerificationScreen';

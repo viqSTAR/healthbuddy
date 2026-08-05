@@ -1,7 +1,15 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { createReadStream, type ReadStream } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { mkdir, unlink, writeFile, stat } from 'node:fs/promises';
+import type { Readable } from 'node:stream';
 import path from 'node:path';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+} from '@aws-sdk/client-s3';
 import { env } from '../config/env.js';
 import { AppError } from './AppError.js';
 
@@ -20,7 +28,7 @@ import { AppError } from './AppError.js';
 export interface StorageDriver {
   readonly name: string;
   put(key: string, body: Buffer, contentType: string): Promise<void>;
-  read(key: string): Promise<ReadStream>;
+  read(key: string): Promise<Readable>;
   remove(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
 }
@@ -84,32 +92,100 @@ const localDriver = (): StorageDriver => {
 };
 
 /**
- * Placeholder for durable object storage. Deliberately throws rather than
- * silently degrading to local disk: a production process that thinks it is
- * writing to S3 but is writing to an ephemeral container filesystem loses
- * every uploaded licence and lab report on the next redeploy.
+ * Durable object storage over the S3 API. Cloudflare R2 speaks that API, so one
+ * driver covers both — R2 only differs in the endpoint (an account-scoped host)
+ * and the region, which is always the literal string "auto".
  *
- * To implement: add `@aws-sdk/client-s3`, and back put/read/remove with
- * PutObject/GetObject/DeleteObject against `env.S3_BUCKET`.
+ * Objects stay **private**. R2 can expose a bucket on a public r2.dev domain and
+ * that is precisely what must not happen here: a public URL to a lab report is
+ * readable by anyone who obtains it, forever, with no login. Reads are streamed
+ * back through the API after documentService has authorised the caller.
  */
-const s3Driver = (): StorageDriver => {
-  const unimplemented = (): never => {
-    throw new AppError(
-      'STORAGE_DRIVER=s3 is configured but the S3 driver is not implemented yet. Install @aws-sdk/client-s3 and complete src/utils/storage.ts.',
-      500
-    );
+const objectDriver = (label: string): StorageDriver => {
+  const bucket = env.S3_BUCKET!;
+
+  const endpoint = env.R2_ACCOUNT_ID
+    ? `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+    : env.S3_ENDPOINT;
+
+  const client = new S3Client({
+    region: env.S3_REGION ?? (env.R2_ACCOUNT_ID ? 'auto' : undefined),
+    endpoint,
+    // R2 needs path-style addressing against the account endpoint; on real S3
+    // it is equivalent, so one setting serves both.
+    forcePathStyle: Boolean(endpoint),
+    credentials:
+      env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY
+        ? { accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY }
+        : undefined,
+    /**
+     * The SDK began sending CRC32 checksums by default in v3.729, which R2
+     * rejects outright with "Header 'x-amz-checksum-crc32' ... not implemented".
+     * WHEN_REQUIRED restores the previous behaviour. Harmless on AWS, so it is
+     * set unconditionally rather than branching on the provider.
+     */
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+
+  /** Turns a driver-level failure into something the API layer can render. */
+  const wrap = async <T>(key: string, op: () => Promise<T>): Promise<T> => {
+    assertSafeKey(key);
+    try {
+      return await op();
+    } catch (err) {
+      const name = (err as { name?: string }).name;
+      if (name === 'NoSuchKey' || name === 'NotFound') {
+        throw new AppError('Stored file is no longer available.', 404);
+      }
+      // Credentials, bucket and network problems are ours, not the caller's.
+      throw new AppError('File storage is unavailable right now.', 503);
+    }
   };
 
   return {
-    name: 's3',
-    put: unimplemented,
-    read: unimplemented,
-    remove: unimplemented,
-    exists: unimplemented,
+    name: label,
+
+    put: (key, body, contentType) =>
+      wrap(key, async () => {
+        await client.send(
+          new PutObjectCommand({
+            Bucket: bucket,
+            Key: key,
+            Body: body,
+            ContentType: contentType,
+            // Belt and braces against a bucket that was made public by mistake.
+            CacheControl: 'private, no-store',
+          })
+        );
+      }),
+
+    read: (key) =>
+      wrap(key, async () => {
+        const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+        if (!res.Body) throw new AppError('Stored file is no longer available.', 404);
+        return res.Body as Readable;
+      }),
+
+    remove: (key) =>
+      wrap(key, async () => {
+        await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+      }).catch(() => undefined), // deleting is idempotent
+
+    async exists(key) {
+      try {
+        assertSafeKey(key);
+        await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
 };
 
-export const storage: StorageDriver = env.STORAGE_DRIVER === 's3' ? s3Driver() : localDriver();
+export const storage: StorageDriver =
+  env.STORAGE_DRIVER === 'local' ? localDriver() : objectDriver(env.STORAGE_DRIVER);
 
 /** Groups uploads by owner so a key is never guessable from the document id. */
 export const buildStorageKey = (ownerUserId: string, fileName: string): string => {

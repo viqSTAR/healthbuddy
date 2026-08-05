@@ -1,4 +1,5 @@
 import type { Response } from 'express';
+import type { PaymentMethod } from '@prisma/client';
 import {
   listMyFulfilmentsService,
   getFulfilmentService,
@@ -9,6 +10,7 @@ import {
 import {
   asyncHandler,
   requirePatientId,
+  requireUser,
   type AuthenticatedRequest,
 } from '../middlewares/auth.js';
 
@@ -37,16 +39,19 @@ export const consentHandler = asyncHandler(async (req: AuthenticatedRequest, res
     deliveryAddress: string;
     latitude?: number;
     longitude?: number;
+    paymentMethod: PaymentMethod;
   };
 
   const result = await consentToFulfilmentService({
     fulfilmentId: id,
     patientId,
+    userId: requireUser(req).userId,
     ...(body.acceptMedicineIds ? { acceptMedicineIds: body.acceptMedicineIds } : {}),
     ...(body.acceptLabPackageIds ? { acceptLabPackageIds: body.acceptLabPackageIds } : {}),
     deliveryAddress: body.deliveryAddress,
     ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
     ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
+    paymentMethod: body.paymentMethod,
     ipAddress: req.ip ?? null,
   });
 

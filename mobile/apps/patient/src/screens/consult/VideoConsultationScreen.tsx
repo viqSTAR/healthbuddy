@@ -17,8 +17,12 @@ export const VideoConsultationScreen: React.FC<{ navigation: any; route: any }> 
   navigation,
   route,
 }) => {
-  const { appointment, micOn: initialMic = true, cameraOn: initialCamera = true } =
-    route.params ?? {};
+  const {
+    appointment,
+    micOn: initialMic = true,
+    cameraOn: initialCamera = true,
+    notice,
+  } = route.params ?? {};
 
   const [micOn, setMicOn] = useState(initialMic);
   const [cameraOn, setCameraOn] = useState(initialCamera);
@@ -49,11 +53,19 @@ export const VideoConsultationScreen: React.FC<{ navigation: any; route: any }> 
           </Text>
 
           <View style={styles.timerPill}>
-            <View style={styles.liveDot} />
+            <View style={[styles.liveDot, notice ? styles.idleDot : null]} />
             <Text variant="captionSm" weight="medium" color={colors.inverseOnSurface}>
-              Connected · {mmss(seconds)}
+              {notice ? 'Preview' : 'Connected'} · {mmss(seconds)}
             </Text>
           </View>
+
+          {/* Say plainly that there is no stream rather than let the timer
+              imply a call is running. */}
+          {notice ? (
+            <Text variant="captionSm" color={colors.outlineVariant} style={styles.notice}>
+              {notice}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.pip}>
@@ -143,6 +155,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.error },
+  idleDot: { backgroundColor: colors.outlineVariant },
+  notice: {
+    marginTop: spacing.base,
+    paddingHorizontal: spacing.xl,
+    textAlign: 'center',
+  },
   pip: {
     position: 'absolute',
     top: spacing.insetPage,

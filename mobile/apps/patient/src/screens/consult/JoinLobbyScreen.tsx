@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable, Alert, Linking } from 'react-native';
 import {
   Avatar,
   Badge,
@@ -10,6 +10,8 @@ import {
   Text,
   TopBar,
   colors,
+  errorMessage,
+  joinConsultation,
   radius,
   spacing,
 } from '@healthbuddy/shared';
@@ -22,6 +24,45 @@ export const JoinLobbyScreen: React.FC<{ navigation: any; route: any }> = ({
   const { appointment } = route.params ?? {};
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
+  const [joining, setJoining] = useState(false);
+
+  /**
+   * Asks the server for a join grant, then opens the room.
+   *
+   * The room opens in the system browser rather than a WebView: camera and
+   * microphone permissions are reliable there on both platforms, and it needs
+   * no native module, so this works in Expo Go today. A dev build with a native
+   * WebRTC SDK is the production upgrade, not a prerequisite for testing.
+   *
+   * When no transport is configured the server says so, and we fall back to the
+   * in-app call shell rather than opening nothing.
+   */
+  const join = async () => {
+    setJoining(true);
+    try {
+      const session = await joinConsultation(appointment.id);
+
+      if (session.url) {
+        const opened = await Linking.canOpenURL(session.url);
+        if (!opened) throw new Error('No browser is available to open the consultation.');
+        await Linking.openURL(session.url);
+        return;
+      }
+
+      navigation.replace('VideoConsultation', {
+        appointment,
+        micOn,
+        cameraOn,
+        notice: session.notice,
+      });
+    } catch (err) {
+      // The server refuses early joins and expired windows with a reason worth
+      // showing verbatim — "opens at 10:00" is more use than "failed".
+      Alert.alert('Cannot join yet', errorMessage(err));
+    } finally {
+      setJoining(false);
+    }
+  };
 
   return (
     <Screen padded={false} bottomInset={spacing.xxl}>
@@ -89,9 +130,8 @@ export const JoinLobbyScreen: React.FC<{ navigation: any; route: any }> = ({
           label="Join now"
           icon="videocam"
           fullWidth
-          onPress={() =>
-            navigation.replace('VideoConsultation', { appointment, micOn, cameraOn })
-          }
+          loading={joining}
+          onPress={() => void join()}
         />
       </View>
     </Screen>

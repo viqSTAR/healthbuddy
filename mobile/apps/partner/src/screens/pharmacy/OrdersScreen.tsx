@@ -20,6 +20,7 @@ import {
   colors,
   errorMessage,
   fetchPharmacyQueue,
+  markCodCollected,
   radius,
   spacing,
   updateMedicineOrderStatus,
@@ -78,6 +79,12 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     setBusyId(order.id);
     try {
       await updateMedicineOrderStatus(order.id, status);
+      // Marking a cash order delivered is also the moment the money arrived,
+      // so settle it in the same step rather than leaving a debt open that
+      // someone has to remember to clear.
+      if (status === 'DELIVERED' && order.payment?.method === 'COD') {
+        await markCodCollected(order.id).catch(() => undefined);
+      }
       queue.reload();
     } catch (err) {
       Alert.alert('Could not update', errorMessage(err));
@@ -164,6 +171,36 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                     {order.address}
                   </Text>
                 </View>
+
+                {/*
+                  Cash orders need collecting at the door, so the rider has to
+                  see that before setting off — not after.
+                */}
+                {order.payment ? (
+                  <View style={styles.address}>
+                    <Icon
+                      name={order.payment.method === 'COD' ? 'payments' : 'check_circle'}
+                      size={14}
+                      color={
+                        order.payment.method === 'COD' ? colors.warningDark : colors.successDark
+                      }
+                    />
+                    <Text
+                      variant="captionSm"
+                      weight="semibold"
+                      color={
+                        order.payment.method === 'COD' ? colors.warningDark : colors.successDark
+                      }
+                      style={styles.flex}
+                    >
+                      {order.payment.method === 'COD'
+                        ? order.payment.status === 'PAID'
+                          ? 'Cash collected'
+                          : `Collect ₹${order.payment.amount.toFixed(0)} on delivery`
+                        : `Paid online · ₹${order.payment.amount.toFixed(0)}`}
+                    </Text>
+                  </View>
+                ) : null}
 
                 <View style={styles.footer}>
                   <Text variant="headlineSm" weight="bold" color={colors.primary}>

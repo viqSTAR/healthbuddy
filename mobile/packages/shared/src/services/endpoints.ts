@@ -124,6 +124,8 @@ export interface OrderItem {
 }
 
 export type OrderStatus =
+  /** Held until the money arrives. Never appears in a partner queue. */
+  | 'PENDING_PAYMENT'
   | 'PLACED'
   | 'ACCEPTED'
   | 'PROCESSING'
@@ -149,6 +151,11 @@ export interface MedicineOrder {
   createdAt: string;
   patient?: { id: string; fullName: string; emergencyContact?: string | null };
   assignedAgent?: { id: string; phoneNumber: string } | null;
+  /**
+   * Present on the partner queue. A rider needs to know whether to collect cash
+   * before they leave, not after.
+   */
+  payment?: { method: PaymentMethod; status: PaymentStatus; amount: number } | null;
 }
 
 export interface LabPackage {
@@ -162,6 +169,7 @@ export interface LabPackage {
 }
 
 export type LabOrderStatus =
+  | 'PENDING_PAYMENT'
   | 'BOOKED'
   | 'ACCEPTED'
   | 'SAMPLE_COLLECTED'
@@ -860,17 +868,138 @@ export const consentToFulfilment = async (
     deliveryAddress: string;
     latitude?: number;
     longitude?: number;
+    paymentMethod: PaymentMethod;
   }
 ) =>
   (
-    await api.post<{ medicineOrderId: string | null; labOrderIds: string[]; message: string }>(
-      `/fulfilment/${id}/consent`,
-      payload
-    )
+    await api.post<{
+      medicineOrderId: string | null;
+      labOrderIds: string[];
+      checkout: Checkout | null;
+      message: string;
+    }>(`/fulfilment/${id}/consent`, payload)
   ).data;
 
 export const declineFulfilment = async (id: string, reason?: string) =>
   (await api.post(`/fulfilment/${id}/decline`, { reason })).data;
+
+/* ---------- Payments ---------- */
+
+export type PaymentMethod = 'UPI' | 'CARD' | 'NETBANKING' | 'WALLET' | 'COD';
+export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED';
+export type PaymentPurpose =
+  | 'APPOINTMENT'
+  | 'MEDICINE_ORDER'
+  | 'LAB_ORDER'
+  | 'PRESCRIPTION_BASKET';
+
+/**
+ * What the server hands back to open a payment.
+ *
+ * `gatewayOrderId` is null for cash on delivery — there is nothing to open, the
+ * order is already confirmed.
+ */
+export interface Checkout {
+  paymentId: string;
+  method: PaymentMethod;
+  amount: number;
+  currency: string;
+  status: string;
+  gatewayOrderId: string | null;
+  publicKey: string | null;
+  message: string;
+}
+
+export interface PaymentRecord {
+  id: string;
+  purpose: PaymentPurpose;
+  method: PaymentMethod;
+  amount: number;
+  currency: string;
+  status: PaymentStatus;
+  paidAt: string | null;
+  refundedAmount: number;
+  refundedAt: string | null;
+  createdAt: string;
+  medicineOrderId: string | null;
+  labOrderId: string | null;
+  appointmentId: string | null;
+  fulfilmentId: string | null;
+}
+
+/** Amounts are never sent — the server prices from the order it already holds. */
+export const startCheckout = async (payload: {
+  purpose: PaymentPurpose;
+  targetId: string;
+  method: PaymentMethod;
+}) => (await api.post<Checkout>('/payments/checkout', payload)).data;
+
+/** Hands the gateway's signed result back for verification. */
+export const confirmPayment = async (payload: {
+  orderId: string;
+  paymentId: string;
+  signature: string;
+}) => (await api.post<{ paymentId: string; status: string; message: string }>(
+  '/payments/confirm',
+  payload
+)).data;
+
+/**
+ * Stands in for the gateway's checkout sheet while PAYMENT_PROVIDER=mock, so
+ * the flow can be exercised end to end without a gateway account. The server
+ * 404s this when a real provider is configured.
+ */
+export const simulatePayment = async (paymentId: string) =>
+  (await api.post<{ status: string; message: string }>(`/payments/${paymentId}/simulate`)).data;
+
+export const fetchMyPayments = async () =>
+  (await api.get<{ payments: PaymentRecord[] }>('/payments/mine')).data.payments;
+
+export interface EarningsLine {
+  id: string;
+  amount: number;
+  status: 'PENDING' | 'SETTLED' | 'REVERSED';
+  settledAt: string | null;
+  createdAt: string;
+  purpose: PaymentPurpose;
+  method: PaymentMethod;
+  paymentStatus: PaymentStatus;
+}
+
+/** A partner's own settlement statement. */
+export const fetchMyEarnings = async () =>
+  (
+    await api.get<{ settledTotal: number; pendingTotal: number; lines: EarningsLine[] }>(
+      '/payments/earnings'
+    )
+  ).data;
+
+/** The pharmacy or delivery agent confirms cash actually changed hands. */
+export const markCodCollected = async (orderId: string) =>
+  (await api.post<{ amount: number }>(`/payments/cod/${orderId}/collected`)).data;
+
+/* ---------- Video consultation ---------- */
+
+export interface VideoSession {
+  provider: string;
+  roomId: string;
+  /** Open this. Null when no transport is configured. */
+  url: string | null;
+  displayName: string;
+  role: 'PATIENT' | 'DOCTOR';
+  expiresAt: string;
+  notice?: string;
+}
+
+/**
+ * Asks for a join grant. The server checks that the caller is actually on this
+ * appointment and that the slot is open before it hands back a room.
+ */
+export const joinConsultation = async (appointmentId: string) =>
+  (await api.post<{ session: VideoSession }>(`/video/${appointmentId}/join`)).data.session;
+
+export const endConsultation = async (appointmentId: string) =>
+  (await api.post<{ status: string }>(`/video/${appointmentId}/end`)).data;
 
 /* ---------- Health content & emergency directory ---------- */
 

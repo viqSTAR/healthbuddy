@@ -10,6 +10,7 @@ const TONE: Record<string, TintName> = {
   COMPLETED: 'success',
   CANCELLED: 'danger',
   // Medicine orders
+  PENDING_PAYMENT: 'warning',
   PLACED: 'info',
   ACCEPTED: 'info',
   PROCESSING: 'warning',
@@ -23,6 +24,14 @@ const TONE: Record<string, TintName> = {
   EN_ROUTE: 'warning',
   ARRIVED: 'info',
   RESOLVED: 'success',
+  // Payments and settlement
+  PENDING: 'warning',
+  PAID: 'success',
+  FAILED: 'danger',
+  REFUNDED: 'neutral',
+  PARTIALLY_REFUNDED: 'warning',
+  SETTLED: 'success',
+  REVERSED: 'danger',
   // Provider applications
   DRAFT: 'neutral',
   SUBMITTED: 'info',

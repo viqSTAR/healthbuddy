@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, Linking } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, Linking, Alert } from 'react-native';
 import {
   Avatar,
   Badge,
@@ -15,7 +15,10 @@ import {
   Text,
   TopBar,
   colors,
+  endConsultation,
+  errorMessage,
   fetchDoctorQueue,
+  joinConsultation,
   spacing,
   useAsync,
 } from '@healthbuddy/shared';
@@ -33,6 +36,52 @@ export const ConsultationScreen: React.FC<{ route: any; navigation: any }> = ({
 
   const queue = useAsync(fetchDoctorQueue, []);
   const appointment = (queue.data ?? []).find((a) => a.id === appointmentId);
+
+  const [joining, setJoining] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  /**
+   * The doctor opening the room is what starts the consultation, so this call
+   * also flips the appointment to in progress server-side.
+   *
+   * The room opens in the system browser — no native module, so it works in
+   * Expo Go. When no transport is configured the server returns a reason
+   * instead of a URL, and that reason is shown rather than swallowed.
+   */
+  const startCall = async () => {
+    setJoining(true);
+    try {
+      const session = await joinConsultation(appointmentId);
+      if (session.url) {
+        setNotice(null);
+        await Linking.openURL(session.url);
+        queue.reload();
+      } else {
+        setNotice(session.notice ?? 'No video transport is configured.');
+      }
+    } catch (err) {
+      Alert.alert('Cannot start the call', errorMessage(err));
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const endCall = () =>
+    Alert.alert('End this consultation?', 'It will be marked completed.', [
+      { text: 'Keep open', style: 'cancel' },
+      {
+        text: 'End',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await endConsultation(appointmentId);
+            queue.reload();
+          } catch (err) {
+            Alert.alert('Could not end it', errorMessage(err));
+          }
+        },
+      },
+    ]);
 
   if (queue.loading) return <Loading label="Loading consultation" />;
   if (queue.error) return <ErrorState message={queue.error} onRetry={queue.reload} />;
@@ -100,7 +149,7 @@ export const ConsultationScreen: React.FC<{ route: any; navigation: any }> = ({
         </Text>
       </Card>
 
-      {isVideo && appointment.meetingRoomId ? (
+      {isVideo && canPrescribe ? (
         <>
           <SectionHeader title="Video consultation" />
           <Card style={styles.videoCard}>
@@ -108,23 +157,34 @@ export const ConsultationScreen: React.FC<{ route: any; navigation: any }> = ({
               <Icon name="videocam" size={20} color={colors.primary} />
               <View style={styles.flex}>
                 <Text variant="labelMd" weight="semibold" color={colors.onSurface}>
-                  Room {appointment.meetingRoomId.slice(-8)}
+                  {appointment.slot?.startTime
+                    ? `Scheduled for ${appointment.slot.startTime}`
+                    : 'Video visit'}
                 </Text>
                 <Text variant="captionSm" color={colors.captionGray}>
-                  Video calling is not yet connected to a media server.
+                  Starting the call marks this consultation in progress.
                 </Text>
               </View>
             </View>
-            {/*
-              Deliberately honest rather than a fake "Join" button: there is no
-              WebRTC transport wired up yet, so the room id is shown and a phone
-              fallback offered instead of pretending to place a call.
-            */}
+
+            {notice ? (
+              <Text variant="captionSm" color={colors.warningDark}>
+                {notice}
+              </Text>
+            ) : null}
+
             <Button
-              label="Call patient instead"
-              icon="call"
+              label="Start video consultation"
+              icon="videocam"
+              loading={joining}
+              onPress={() => void startCall()}
+              fullWidth
+            />
+            <Button
+              label="End consultation"
+              icon="call_end"
               variant="outline"
-              onPress={() => void Linking.openURL('tel:')}
+              onPress={endCall}
               fullWidth
             />
           </Card>

@@ -75,10 +75,15 @@ flowchart TB
 ```
 
 **[built]** API, PostgreSQL, Redis, SMS, push.
-**[built]** Object storage *interface* — local-disk driver works, S3 driver is a
-deliberate stub that throws rather than silently degrading. **[missing]** the S3
-implementation.
-**[blocked]** payments, video, ABDM — each needs an account you hold.
+**[built]** Object storage — one driver serves Cloudflare R2 and S3, since R2
+speaks the S3 API. Local disk remains for development and is refused in
+production.
+**[built]** Payments behind a provider interface: `mock` simulates the whole
+flow offline, `razorpay` uses Route so the *licensed* aggregator holds and
+splits the money. **[blocked]** going live needs your aggregator account.
+**[built]** Video behind a provider interface: `mock`, `jitsi`, `daily` — all
+three hand back a URL a browser opens, so they work in Expo Go.
+**[blocked]** ABDM registry checks — needs sandbox credentials you hold.
 
 ---
 
@@ -239,32 +244,56 @@ broke, and it has six regression tests guarding it.
 | Audit log of privileged actions | `auditService.ts` |
 | Licence expiry tracking + auto-suspension | `applicationService.ts` |
 | Admin panel: review, users, emergency, audit | `admin/src/pages/` |
+| Prescription → order with patient consent | `fulfilmentService.ts` |
+| Image-based consultation | `documentService.ts` |
+| Condition-matched health notifications | `healthContentService.ts` |
+| Emergency services directory (public) | `emergencyDirectoryService.ts` |
+| Checkout, split settlement, refunds, COD | `paymentService.ts`, `payment/provider.ts` |
+| Object storage on R2 / S3 | `utils/storage.ts` |
+| Video room minting + join authorisation | `videoService.ts` |
 
-### Building now
+### Money: how a payment flows
 
-| Capability | Why it matters |
-| --- | --- |
-| Prescription → order with patient consent | The automation the product is built around |
-| Image-based consultation | Half of consults don't need video |
-| Condition-based health notifications | Retention, and genuinely useful |
-| Emergency services directory | Makes the SOS page actionable |
+```
+patient approves a basket, picks a method
+        │
+   ┌────┴────┐
+  COD      prepaid
+   │          │
+   │     PaymentSplit legs computed in integer paise;
+   │     the platform takes the REMAINDER so the legs
+   │     always sum to exactly what is charged
+   │          │
+   │     aggregator collects, holds and splits
+   │          │
+   │     signed handoff OR signed webhook  ← the only
+   │          │                              things that
+   │          │                              mark it PAID
+   └────┬─────┘
+        ▼
+  orders leave PENDING_PAYMENT and reach partner queues
+```
 
-### Missing — blocked on your decisions
+Two invariants: **no client can mark its own order paid**, and **the platform
+never custodies partner money** — the second is what keeps this outside RBI
+payment-aggregator authorisation.
+
+### Blocked on your accounts
 
 | Capability | What it needs from you |
 | --- | --- |
-| **Payments** | A licensed payment aggregator account with split settlement (Razorpay Route / Cashfree Easy Split). You must not custody funds — that requires RBI authorisation. |
-| **Video consultation** | A WebRTC provider (Agora, 100ms, Twilio Video, Daily). All need an account and a native dev build; none work in Expo Go. |
+| **Payments going live** | A Razorpay account with Route enabled, and each partner onboarded as a linked account. Code is done; set `PAYMENT_PROVIDER=razorpay` plus the three keys. |
+| **Video going live** | A Daily API key (~10,000 free participant-minutes/month) or your own Jitsi deployment. `meet.jit.si` works today but makes the first participant sign in with Google/GitHub/Facebook. |
 | **ABDM registry checks** | Sandbox credentials for HPR (doctors) and HFR (facilities). IDs are already captured and shown to reviewers. |
 | **SMS in production** | A provider account. `SMS_PROVIDER=mock` is rejected in production. |
-| **Object storage** | An S3-compatible bucket. Driver is stubbed to throw rather than lose files silently. |
+| **Object storage going live** | An R2 bucket plus an API token. Keep the bucket private — do not enable the `r2.dev` public URL. |
 
 ### Missing — operational, no external dependency
 
 | Gap | Impact |
 | --- | --- |
 | Prisma **migrations** (currently `db push`) | No rollback path on a live database |
-| **CI** | Nothing runs the 38 tests automatically |
+| **CI** | Nothing runs the 59 tests automatically |
 | **Error tracking** (Sentry) | You would learn about failures from users |
 | **Pagination** on ~33 list queries | `getDoctorAppointments` returns every appointment ever |
 | **Frontend tests** | 0 across 90 app source files |
@@ -289,13 +318,16 @@ then the admin panel dispatches and the patient dials directly.
 
 ## 11. Recommended launch order
 
-1. **Finish the consent automation** — it is the product's differentiator
-2. **Payments** — no revenue without it
-3. **Migrations + CI + Sentry** — roughly a day, and it makes everything else safe to change
-4. **S3 driver** — before any real licence document is uploaded
+1. ~~Consent automation~~ · ~~payments~~ · ~~storage~~ · ~~video~~ — **done**, all
+   behind provider interfaces so switching from mock to live is configuration
+2. **Turn on the real providers**: R2 credentials, a Razorpay account with Route,
+   a Daily key or your own Jitsi host, an SMS provider
+3. **Onboard each partner as a linked account** — until a partner has a
+   `payoutAccountId`, their share is recorded as owed but stays in the platform's
+   settlement rather than being split out
+4. **Migrations + CI + Sentry** — roughly a day, and it makes everything else safe to change
 5. **Pagination** — before onboarding beyond a handful of providers
-6. **Video** — a scheduled call with a phone fallback covers a surprising amount
-7. Rider app → ambulance app → i18n
+6. Rider app → ambulance app → i18n
 
-Launching without 2 and 3 means a platform that cannot take money and cannot
+Launching without 2 and 4 means a platform that cannot take money and cannot
 tell you when it breaks.

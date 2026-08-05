@@ -20,13 +20,29 @@ import {
   fetchMyProfile,
   radius,
   spacing,
+  simulatePayment,
   useAsync,
+  type Checkout,
   type LabQuoteLine,
   type MedicineQuoteLine,
+  type PaymentMethod,
 } from '@healthbuddy/shared';
 
 const hoursLeft = (iso: string): number =>
   Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 3600_000));
+
+/**
+ * Payment choices, in the order a quick-commerce checkout shows them.
+ *
+ * COD is last and labelled with what it means, because it is the one option
+ * where the patient still owes money after the order is confirmed.
+ */
+const PAYMENT_METHODS: { value: PaymentMethod; label: string; hint: string; icon: string }[] = [
+  { value: 'UPI', label: 'UPI', hint: 'GPay, PhonePe, Paytm', icon: 'account_balance' },
+  { value: 'CARD', label: 'Card', hint: 'Credit or debit', icon: 'credit_card' },
+  { value: 'NETBANKING', label: 'Net banking', hint: 'All major banks', icon: 'account_balance' },
+  { value: 'COD', label: 'Cash on delivery', hint: 'Pay the rider at your door', icon: 'payments' },
+];
 
 /**
  * The consent screen.
@@ -51,6 +67,7 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
   const [excludedMedicines, setExcludedMedicines] = useState<Set<string>>(new Set());
   const [excludedTests, setExcludedTests] = useState<Set<string>>(new Set());
   const [address, setAddress] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>('UPI');
   const [busy, setBusy] = useState(false);
 
   // Prefill from the saved profile address, but let it be edited per order.
@@ -123,16 +140,62 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
         // as a written address.
         ...(profile.data?.latitude != null ? { latitude: profile.data.latitude } : {}),
         ...(profile.data?.longitude != null ? { longitude: profile.data.longitude } : {}),
+        paymentMethod: method,
       });
-      Alert.alert('Order placed', result.message, [
-        { text: 'Track it', onPress: () => navigation.replace('Tabs', { screen: 'Orders' }) },
-      ]);
+
+      await settle(result.checkout, result.message);
     } catch (err) {
       Alert.alert('Could not place the order', errorMessage(err));
       fulfilment.reload();
     } finally {
       setBusy(false);
     }
+  };
+
+  const goToOrders = () => navigation.replace('Tabs', { screen: 'Orders' });
+
+  /**
+   * Takes the checkout the server opened and finishes it.
+   *
+   * Cash on delivery is already done — the order is confirmed and the money
+   * arrives at the door. A prepaid order still has to be paid, and until it is,
+   * no pharmacy sees it, so leaving the patient on this screen with an
+   * unexplained "placed" would be a lie.
+   */
+  const settle = async (checkout: Checkout | null, fallbackMessage: string) => {
+    if (!checkout) {
+      Alert.alert('Saved, but not paid', fallbackMessage, [
+        { text: 'Open my orders', onPress: goToOrders },
+      ]);
+      return;
+    }
+
+    if (checkout.method === 'COD') {
+      Alert.alert('Order confirmed', checkout.message, [{ text: 'Track it', onPress: goToOrders }]);
+      return;
+    }
+
+    // With a real gateway this is where the checkout sheet opens; against the
+    // mock provider the server mints the same signed result the sheet would.
+    if (checkout.publicKey === 'mock_key') {
+      try {
+        const paid = await simulatePayment(checkout.paymentId);
+        Alert.alert('Payment received', paid.message, [
+          { text: 'Track it', onPress: goToOrders },
+        ]);
+      } catch (err) {
+        Alert.alert('Payment did not complete', errorMessage(err), [
+          { text: 'Open my orders', onPress: goToOrders },
+        ]);
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Ready to pay',
+      `₹${checkout.amount.toFixed(2)} is due. Your order is held until the payment goes through.`,
+      [{ text: 'Open my orders', onPress: goToOrders }]
+    );
   };
 
   const decline = () => {
@@ -245,6 +308,18 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
             />
           </Card>
 
+          <SectionHeader title="Payment" />
+          <View style={styles.list}>
+            {PAYMENT_METHODS.map((option) => (
+              <PaymentOption
+                key={option.value}
+                option={option}
+                selected={method === option.value}
+                onSelect={() => setMethod(option.value)}
+              />
+            ))}
+          </View>
+
           <SectionHeader title="Summary" />
           <Card style={styles.summary}>
             <SummaryRow label="Medicines" value={totals.medicines} />
@@ -267,7 +342,11 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
 
           <View style={styles.actions}>
             <Button
-              label={`Approve and order · ₹${totals.grand.toFixed(0)}`}
+              label={
+                method === 'COD'
+                  ? `Place order · pay ₹${totals.grand.toFixed(0)} on delivery`
+                  : `Pay ₹${totals.grand.toFixed(0)} and order`
+              }
               icon="check_circle"
               iconPosition="right"
               onPress={() => void approve()}
@@ -394,6 +473,38 @@ const TestRow: React.FC<{
   );
 };
 
+const PaymentOption: React.FC<{
+  option: (typeof PAYMENT_METHODS)[number];
+  selected: boolean;
+  onSelect: () => void;
+}> = ({ option, selected, onSelect }) => (
+  <Pressable
+    onPress={onSelect}
+    accessibilityRole="radio"
+    accessibilityState={{ selected }}
+    accessibilityLabel={`${option.label}. ${option.hint}`}
+  >
+    <Card style={[styles.row, selected && styles.rowSelected]}>
+      <View style={[styles.radio, selected && styles.radioOn]}>
+        {selected ? <View style={styles.radioDot} /> : null}
+      </View>
+      <Icon
+        name={option.icon}
+        size={20}
+        color={selected ? colors.primary : colors.onSurfaceVariant}
+      />
+      <View style={styles.flex}>
+        <Text variant="labelMd" weight="semibold" color={colors.onSurface}>
+          {option.label}
+        </Text>
+        <Text variant="captionSm" color={colors.captionGray}>
+          {option.hint}
+        </Text>
+      </View>
+    </Card>
+  </Pressable>
+);
+
 const SummaryRow: React.FC<{ label: string; value: number; hint?: string }> = ({
   label,
   value,
@@ -421,6 +532,23 @@ const styles = StyleSheet.create({
   list: { gap: spacing.insetCard },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.insetCard },
   rowMuted: { opacity: 0.55 },
+  rowSelected: { borderWidth: 1.5, borderColor: colors.primary },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: radius.full,
+    borderWidth: 2,
+    borderColor: colors.outlineVariant,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOn: { borderColor: colors.primary },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
+  },
   check: {
     width: 24,
     height: 24,

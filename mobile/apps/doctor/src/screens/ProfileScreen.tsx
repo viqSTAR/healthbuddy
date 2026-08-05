@@ -191,6 +191,14 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
           showChevron
         />
         <ListRow
+          icon="account_balance"
+          iconTint="success"
+          title="Earnings"
+          subtitle="Consultation fees, net of platform commission"
+          onPress={() => navigation.navigate('Earnings')}
+          showChevron
+        />
+        <ListRow
           icon="notifications"
           iconTint="warning"
           title="Notifications"

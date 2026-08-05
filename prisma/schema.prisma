@@ -54,7 +54,11 @@ enum SlotStatus {
   BOOKED
 }
 
+/// PENDING_PAYMENT exists so a partner never starts work on an order nobody has
+/// paid for. Prepaid orders sit here until the gateway confirms; cash-on-delivery
+/// orders skip it and are PLACED immediately.
 enum OrderStatus {
+  PENDING_PAYMENT
   PLACED
   ACCEPTED
   PROCESSING
@@ -64,6 +68,7 @@ enum OrderStatus {
 }
 
 enum LabOrderStatus {
+  PENDING_PAYMENT
   BOOKED
   ACCEPTED
   SAMPLE_COLLECTED
@@ -176,16 +181,47 @@ enum NotificationType {
 }
 
 enum PaymentStatus {
+  /// Created, awaiting the payer. Also where a COD payment sits until delivery.
   PENDING
   PAID
   FAILED
   REFUNDED
+  /// Part of the amount was returned — a cancelled line in a multi-item order.
+  PARTIALLY_REFUNDED
 }
 
 enum PaymentPurpose {
   APPOINTMENT
   MEDICINE_ORDER
   LAB_ORDER
+  /// One approved prescription basket — medicines and tests together, paid for
+  /// once. Splitting it into a payment per order would make the patient face
+  /// three checkout sheets for one decision.
+  PRESCRIPTION_BASKET
+}
+
+/// How the patient chose to pay. COD is settled by the delivery agent and is the
+/// only method where goods move before money does.
+enum PaymentMethod {
+  UPI
+  CARD
+  NETBANKING
+  WALLET
+  COD
+}
+
+/// Who a settlement leg pays out to.
+enum PayeeType {
+  PHARMACY
+  LAB
+  DOCTOR
+  PLATFORM
+}
+
+enum SplitStatus {
+  PENDING
+  SETTLED
+  REVERSED
 }
 
 /// Lifecycle of turning a prescription into actual orders.
@@ -300,6 +336,12 @@ model Doctor {
   hprId                     String?
   verifiedAt                DateTime?
 
+  /// Linked account at the payment aggregator. Until this is set the doctor's
+  /// share cannot be split out and is held for manual settlement.
+  payoutAccountId   String?
+  /// Overrides the platform default when set. Percent.
+  commissionPercent Float?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -337,6 +379,11 @@ model Pharmacy {
   hfrId             String?
   verifiedAt        DateTime?
 
+  /// Linked account at the payment aggregator, and this partner's commission
+  /// rate when it differs from the platform default.
+  payoutAccountId   String?
+  commissionPercent Float?
+
   createdAt DateTime @default(now())
   // Defaulted so the column can backfill over pharmacies created before this
   // field existed; @updatedAt still maintains it on every write.
@@ -370,6 +417,9 @@ model LabPartner {
   nablExpiry            DateTime?
   hfrId                 String?
   verifiedAt            DateTime?
+
+  payoutAccountId   String?
+  commissionPercent Float?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -510,7 +560,13 @@ model Appointment {
   type          AppointmentType   @default(VIDEO)
   status        AppointmentStatus @default(SCHEDULED)
   symptoms      String?
+  /// Unguessable room identifier, minted on first join. A room name is a bearer
+  /// credential on most hosted video services — anyone who can guess it walks
+  /// into the consultation — so it is random, never derived from the id.
   meetingRoomId String?
+  /// Which provider minted `meetingRoomId`, so a room is never reinterpreted
+  /// against a different service after a config change.
+  meetingProvider String?
 
   /// Set at booking time by counting the patient's earlier completed consults
   /// with this doctor. Determines which telemedicine drug lists are available.
@@ -614,6 +670,8 @@ model PrescriptionFulfilment {
 
   medicineOrders MedicineOrder[]
   labOrders      LabOrder[]
+  /// One payment covers the whole approved basket.
+  payment        Payment?
 
   @@index([patientId, status])
   @@index([status, expiresAt])
@@ -865,12 +923,19 @@ model Notification {
 /// Mirrors the state held by the licensed payment aggregator. The platform
 /// does not custody funds — the aggregator escrows and split-settles, so this
 /// table is a local view for reconciliation and partner-facing statements.
+///
+/// `status` here is a *reflection* of the gateway's opinion, never the source of
+/// truth. It is only ever advanced by a verified signature (client handoff) or a
+/// verified webhook, so a client cannot talk its own order into being paid.
 model Payment {
   id          String         @id @default(uuid())
   userId      String
   user        User           @relation(fields: [userId], references: [id])
   purpose     PaymentPurpose
+  method      PaymentMethod  @default(UPI)
+  /// What the payer is charged, inclusive of delivery and collection fees.
   amount      Float
+  /// The platform's cut, already contained within `amount`.
   platformFee Float          @default(0)
   currency    String         @default("INR")
   status      PaymentStatus  @default(PENDING)
@@ -882,19 +947,80 @@ model Payment {
   gatewayTransferId String?
   failureReason     String?
 
+  paidAt         DateTime?
+  refundedAmount Float     @default(0)
+  refundedAt     DateTime?
+  refundReason   String?
+  gatewayRefundId String?
+
+  /// Guards against a retried checkout creating a second charge for one order.
+  idempotencyKey String? @unique
+
   appointmentId   String?        @unique
   appointment     Appointment?   @relation(fields: [appointmentId], references: [id])
   medicineOrderId String?        @unique
   medicineOrder   MedicineOrder? @relation(fields: [medicineOrderId], references: [id])
   labOrderId      String?        @unique
   labOrder        LabOrder?      @relation(fields: [labOrderId], references: [id])
+  /// Set when this pays for a whole approved prescription basket, which may
+  /// cover a medicine order and several lab bookings at once.
+  fulfilmentId    String?                 @unique
+  fulfilment      PrescriptionFulfilment? @relation(fields: [fulfilmentId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  splits PaymentSplit[]
+
   @@index([userId])
   @@index([status])
   @@index([gatewayOrderId])
+  @@index([gatewayPaymentId])
+}
+
+/// One payee's share of a payment.
+///
+/// The platform is a marketplace: the pharmacy sells the medicine, the lab runs
+/// the test. Collecting the full amount into a platform account and paying
+/// partners out later makes the platform a payment aggregator, which needs an
+/// RBI authorisation. Instead the licensed aggregator splits at settlement and
+/// this table records the arithmetic for statements and reconciliation.
+model PaymentSplit {
+  id        String      @id @default(uuid())
+  paymentId String
+  payment   Payment     @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payeeType PayeeType
+  /// Pharmacy / LabPartner / Doctor id. Null for the platform's own leg.
+  payeeId   String?
+  /// The payee's account at the aggregator, resolved when the split is built.
+  /// Null means the partner has not finished payout onboarding yet.
+  payoutAccountId String?
+  amount    Float
+  status    SplitStatus @default(PENDING)
+  gatewayTransferId String?
+  settledAt DateTime?
+  createdAt DateTime    @default(now())
+
+  @@index([paymentId])
+  @@index([payeeType, payeeId])
+  @@index([status])
+}
+
+/// A webhook the gateway has delivered. Recorded before it is acted on, so a
+/// redelivery (which gateways do routinely) cannot apply the same event twice.
+model PaymentWebhookEvent {
+  id         String   @id @default(uuid())
+  gateway    String
+  /// The gateway's own event id, or a hash of the payload when it sends none.
+  eventId    String
+  eventType  String
+  payload    Json
+  processedAt DateTime?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@unique([gateway, eventId])
+  @@index([processedAt])
 }
 
 // ---------------------------------------------------------------------------

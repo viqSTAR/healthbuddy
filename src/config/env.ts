@@ -55,8 +55,9 @@ const envSchema = z
     /**
      * File storage. "local" writes under UPLOAD_DIR and is fine for development;
      * production needs durable object storage, so it is rejected below.
+     * "r2" and "s3" share one driver — R2 speaks the S3 API.
      */
-    STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+    STORAGE_DRIVER: z.enum(['local', 's3', 'r2']).default('local'),
     UPLOAD_DIR: z.string().default('./uploads'),
     MAX_UPLOAD_MB: z.coerce.number().positive().max(50).default(10),
     /** Lifetime of a signed download link. Short — these point at health data. */
@@ -67,14 +68,118 @@ const envSchema = z
     S3_ENDPOINT: z.string().optional(),
     S3_ACCESS_KEY_ID: z.string().optional(),
     S3_SECRET_ACCESS_KEY: z.string().optional(),
+    /** Cloudflare account id. Present ⇒ the endpoint and region are derived. */
+    R2_ACCOUNT_ID: z.string().optional(),
+
+    /* ---------- Money ---------- */
+
+    /**
+     * "mock" settles locally with a deterministic signature so the whole
+     * checkout → pay → split → refund path is testable with no gateway account.
+     * It never moves money and is rejected in production.
+     */
+    PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
+    RAZORPAY_KEY_ID: z.string().optional(),
+    RAZORPAY_KEY_SECRET: z.string().optional(),
+    /** Set in the Razorpay dashboard; verifies webhook authenticity. */
+    RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
+    /** Platform commission, in percent, per payee type. */
+    COMMISSION_PHARMACY_PCT: z.coerce.number().min(0).max(50).default(10),
+    COMMISSION_LAB_PCT: z.coerce.number().min(0).max(50).default(15),
+    /**
+     * A platform facilitation fee on a consult, not a share of the clinical
+     * fee — see the note in paymentService about fee-splitting.
+     */
+    COMMISSION_DOCTOR_PCT: z.coerce.number().min(0).max(50).default(10),
+
+    /** Cash on delivery. Switchable because it carries real fraud cost. */
+    COD_ENABLED: z.enum(['true', 'false']).default('true'),
+    /** Above this basket value COD is refused — the loss on a bad order hurts. */
+    COD_MAX_ORDER_VALUE: z.coerce.number().positive().default(5000),
+
+    /* ---------- Video consultations ---------- */
+
+    /**
+     * "mock" renders the call shell with no transport (the pre-existing
+     * behaviour). "jitsi" and "daily" both hand back a URL a plain browser can
+     * open, which is what makes them testable in Expo Go — a native WebRTC SDK
+     * would need a development build.
+     */
+    VIDEO_PROVIDER: z.enum(['mock', 'jitsi', 'daily']).default('mock'),
+    /**
+     * meet.jit.si requires the *first* participant to sign in with Google,
+     * GitHub or Facebook before a room opens; later participants join freely.
+     * Point this at your own deployment to drop that requirement.
+     */
+    JITSI_DOMAIN: z.string().default('meet.jit.si'),
+    DAILY_API_KEY: z.string().optional(),
+    /** The <name> in https://<name>.daily.co. Shown on the Daily dashboard. */
+    DAILY_SUBDOMAIN: z.string().optional(),
+    /** Minutes before the slot that the room opens. */
+    VIDEO_JOIN_LEAD_MINUTES: z.coerce.number().int().positive().max(120).default(10),
+    /** Minutes after the slot start that the room stops accepting joins. */
+    VIDEO_JOIN_GRACE_MINUTES: z.coerce.number().int().positive().max(360).default(60),
   })
   .superRefine((cfg, ctx) => {
-    if (cfg.STORAGE_DRIVER === 's3' && !cfg.S3_BUCKET) {
+    if (cfg.STORAGE_DRIVER !== 'local') {
+      if (!cfg.S3_BUCKET) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['S3_BUCKET'],
+          message: `S3_BUCKET is required when STORAGE_DRIVER=${cfg.STORAGE_DRIVER}.`,
+        });
+      }
+      if (!cfg.S3_ACCESS_KEY_ID || !cfg.S3_SECRET_ACCESS_KEY) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['S3_ACCESS_KEY_ID'],
+          message:
+            'S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are required for object storage. For R2 these are the Access Key ID and Secret Access Key from an R2 API token.',
+        });
+      }
+      if (cfg.STORAGE_DRIVER === 'r2' && !cfg.R2_ACCOUNT_ID) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['R2_ACCOUNT_ID'],
+          message:
+            'R2_ACCOUNT_ID is required when STORAGE_DRIVER=r2 — it forms the endpoint https://<id>.r2.cloudflarestorage.com.',
+        });
+      }
+      if (cfg.STORAGE_DRIVER === 's3' && !cfg.S3_REGION && !cfg.S3_ENDPOINT) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['S3_REGION'],
+          message: 'S3_REGION or S3_ENDPOINT is required when STORAGE_DRIVER=s3.',
+        });
+      }
+    }
+
+    if (cfg.VIDEO_PROVIDER === 'daily' && !cfg.DAILY_API_KEY) {
       ctx.addIssue({
         code: 'custom',
-        path: ['S3_BUCKET'],
-        message: 'S3_BUCKET is required when STORAGE_DRIVER=s3.',
+        path: ['DAILY_API_KEY'],
+        message: 'DAILY_API_KEY is required when VIDEO_PROVIDER=daily.',
       });
+    }
+
+    if (cfg.PAYMENT_PROVIDER === 'razorpay') {
+      if (!cfg.RAZORPAY_KEY_ID || !cfg.RAZORPAY_KEY_SECRET) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['RAZORPAY_KEY_ID'],
+          message:
+            'RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENT_PROVIDER=razorpay.',
+        });
+      }
+      if (!cfg.RAZORPAY_WEBHOOK_SECRET) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['RAZORPAY_WEBHOOK_SECRET'],
+          message:
+            'RAZORPAY_WEBHOOK_SECRET is required — without it any caller could post a forged "payment succeeded" webhook and release an unpaid order to a partner.',
+        });
+      }
     }
 
     if (cfg.NODE_ENV === 'production') {
@@ -98,6 +203,14 @@ const envSchema = z
           code: 'custom',
           path: ['SMS_PROVIDER'],
           message: 'SMS_PROVIDER cannot be "mock" in production — no OTP would ever be delivered.',
+        });
+      }
+      if (cfg.PAYMENT_PROVIDER === 'mock') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['PAYMENT_PROVIDER'],
+          message:
+            'PAYMENT_PROVIDER cannot be "mock" in production — it marks orders paid without collecting anything.',
         });
       }
       if (!cfg.CORS_ORIGINS.trim()) {

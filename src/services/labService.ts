@@ -3,6 +3,7 @@ import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { toPublicDocument } from './documentService.js';
+import { refundForTargetService } from './paymentService.js';
 
 export const getLabPackagesService = async (category?: string, page = 1, limit = 20) => {
   const where: Prisma.LabPackageWhereInput = category
@@ -48,17 +49,26 @@ export const getPatientLabOrderByIdService = async (orderId: string, patientId: 
   return order;
 };
 
-/** Scoped to the requesting lab partner, plus not-yet-assigned orders. */
+/**
+ * Scoped to the requesting lab partner, plus not-yet-assigned orders.
+ *
+ * PENDING_PAYMENT never appears: a lab that sees an unpaid booking will send a
+ * phlebotomist to a house for a test nobody has paid for.
+ */
 export const getLabQueueService = async (
   labPartnerId: string,
-  status?: LabOrderStatus
+  status?: LabOrderStatus,
+  limit = 100
 ) => {
   const orders = await prisma.labOrder.findMany({
     where: {
       OR: [{ labPartnerId }, { labPartnerId: null }],
-      ...(status ? { status } : {}),
+      ...(status && status !== 'PENDING_PAYMENT'
+        ? { status }
+        : { status: { not: 'PENDING_PAYMENT' } }),
     },
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    take: Math.min(limit, 200),
     include: {
       patient: {
         select: { id: true, fullName: true, age: true, gender: true, emergencyContact: true },
@@ -198,6 +208,11 @@ export const updateLabOrderStatusService = async (
   if (!order) throw notFound('Lab order');
   if (order.labPartnerId && order.labPartnerId !== labPartnerId) throw notFound('Lab order');
 
+  // Unpaid bookings leave PENDING_PAYMENT only when the money clears.
+  if (order.status === 'PENDING_PAYMENT') {
+    throw conflict('This booking has not been paid for yet.');
+  }
+
   const stamp = LAB_STATUS_TIMESTAMPS[status];
 
   const updated = await prisma.labOrder.update({
@@ -209,11 +224,22 @@ export const updateLabOrderStatusService = async (
     },
   });
 
+  let refund = { refunded: false, amount: 0 };
+  if (status === 'CANCELLED') {
+    refund = await refundForTargetService(
+      order.fulfilmentId ? { fulfilmentId: order.fulfilmentId } : { labOrderId: order.id },
+      'Lab booking cancelled.'
+    );
+  }
+
   await notify({
     userId: order.patient.userId,
     type: 'ORDER_STATUS_CHANGED',
     title: 'Lab booking update',
-    body: `${order.testName} is now ${status.replace(/_/g, ' ').toLowerCase()}.`,
+    body:
+      status === 'CANCELLED' && refund.refunded
+        ? `${order.testName} was cancelled. ₹${refund.amount.toFixed(2)} is being refunded.`
+        : `${order.testName} is now ${status.replace(/_/g, ' ').toLowerCase()}.`,
     data: { labOrderId: order.id, status },
     appId: 'PATIENT',
   });

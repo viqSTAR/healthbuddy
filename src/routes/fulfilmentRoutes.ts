@@ -35,6 +35,9 @@ router.post(
       deliveryAddress: z.string().trim().min(5, 'A delivery address is required.').max(300),
       latitude: latitudeSchema.optional(),
       longitude: longitudeSchema.optional(),
+      // Approving and choosing how to pay are one action for the patient, so
+      // consent carries the method and opens the checkout in the same call.
+      paymentMethod: z.enum(['UPI', 'CARD', 'NETBANKING', 'WALLET', 'COD']).default('UPI'),
     }),
   }),
   consentHandler

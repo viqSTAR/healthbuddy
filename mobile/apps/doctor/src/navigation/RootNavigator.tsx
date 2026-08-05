@@ -4,6 +4,7 @@ import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
+  EarningsScreen,
   NotificationsScreen,
   OtpVerificationScreen,
   VerificationStatus,
@@ -83,6 +84,7 @@ const VerifiedArea: React.FC = () => {
       <Stack.Screen name="Consultation" component={ConsultationScreen} />
       <Stack.Screen name="Prescribe" component={PrescribeScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen name="Earnings" component={EarningsScreen} />
     </Stack.Navigator>
   );
 };

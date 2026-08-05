@@ -1,8 +1,9 @@
-import type { Prisma } from '@prisma/client';
+import type { PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { recordAudit } from './auditService.js';
+import { createCheckoutService } from './paymentService.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -316,21 +317,27 @@ export const getFulfilmentService = async (id: string, patientId: string) => {
 export interface ConsentInput {
   fulfilmentId: string;
   patientId: string;
+  userId: string;
   /** Lets the patient drop items they already have. Empty means "everything". */
   acceptMedicineIds?: string[];
   acceptLabPackageIds?: string[];
   deliveryAddress: string;
   latitude?: number;
   longitude?: number;
+  paymentMethod: PaymentMethod;
   ipAddress?: string | null;
 }
 
 /**
- * The consent action. Creates the real orders.
+ * The consent action. Creates the real orders and opens the checkout.
  *
  * Prices come from the stored quote, never from the request — the patient is
  * charged exactly what they were shown. The status transition is a conditional
  * update so a double-tap cannot produce two sets of orders.
+ *
+ * Orders are created in PENDING_PAYMENT and are invisible to partners until the
+ * money is confirmed. Cash on delivery is the exception: the cash arrives at
+ * the door, so those orders are released immediately.
  */
 export const consentToFulfilmentService = async (input: ConsentInput) => {
   const fulfilment = await prisma.prescriptionFulfilment.findUnique({
@@ -417,6 +424,8 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
           // prescription-only items at all.
           prescriptionId: fulfilment.prescriptionId,
           fulfilmentId: fulfilment.id,
+          // Held until paid. Partner queues filter this status out.
+          status: 'PENDING_PAYMENT',
         },
       });
       created.medicineOrderId = order.id;
@@ -432,7 +441,7 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
           address: input.deliveryAddress,
           latitude: input.latitude ?? null,
           longitude: input.longitude ?? null,
-          status: test.labPartnerId ? 'ACCEPTED' : 'BOOKED',
+          status: 'PENDING_PAYMENT',
           fulfilmentId: fulfilment.id,
         },
       });
@@ -459,55 +468,40 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
       labOrderIds: created.labOrderIds,
       medicineCount: chosenMedicines.length,
       testCount: chosenTests.length,
+      paymentMethod: input.paymentMethod,
     },
     ipAddress: input.ipAddress ?? null,
   });
 
-  await notifyPartners(created);
+  /**
+   * Opening the checkout is the last step, and a failure here must not undo the
+   * consent: the orders exist and are held, so the patient can simply retry
+   * payment. Rolling the whole thing back would make them re-approve a
+   * prescription they already approved.
+   */
+  let checkout: Awaited<ReturnType<typeof createCheckoutService>> | null = null;
+  try {
+    checkout = await createCheckoutService({
+      userId: input.userId,
+      patientId: input.patientId,
+      purpose: 'PRESCRIPTION_BASKET',
+      targetId: fulfilment.id,
+      method: input.paymentMethod,
+      ipAddress: input.ipAddress ?? null,
+    });
+  } catch (err) {
+    logger.error(`[fulfilment] checkout could not be opened for ${fulfilment.id}`, err);
+  }
 
   return {
     fulfilmentId: fulfilment.id,
     medicineOrderId: created.medicineOrderId ?? null,
     labOrderIds: created.labOrderIds,
-    message: 'Order placed. You can track it from your orders.',
+    checkout,
+    message: checkout
+      ? checkout.message
+      : 'Your order is saved but payment could not be started. Open it from your orders to pay.',
   };
-};
-
-/** Tells the assigned pharmacy and labs that work has arrived. */
-const notifyPartners = async (created: { medicineOrderId?: string; labOrderIds: string[] }) => {
-  if (created.medicineOrderId) {
-    const order = await prisma.medicineOrder.findUnique({
-      where: { id: created.medicineOrderId },
-      select: { pharmacy: { select: { userId: true } } },
-    });
-    if (order?.pharmacy) {
-      await notify({
-        userId: order.pharmacy.userId,
-        type: 'ORDER_PLACED',
-        title: 'New prescription order',
-        body: 'A patient approved a prescription. The order is in your queue.',
-        data: { orderId: created.medicineOrderId },
-        appId: 'PARTNER',
-      });
-    }
-  }
-
-  for (const labOrderId of created.labOrderIds) {
-    const order = await prisma.labOrder.findUnique({
-      where: { id: labOrderId },
-      select: { testName: true, labPartner: { select: { userId: true } } },
-    });
-    if (order?.labPartner) {
-      await notify({
-        userId: order.labPartner.userId,
-        type: 'LAB_BOOKED',
-        title: 'New test booking',
-        body: `${order.testName} was booked from a prescription.`,
-        data: { labOrderId },
-        appId: 'PARTNER',
-      });
-    }
-  }
 };
 
 export const declineFulfilmentService = async (

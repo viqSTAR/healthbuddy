@@ -124,6 +124,14 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
       <SectionHeader title="Account" />
       <Card padded={false}>
         <ListRow
+          icon="account_balance"
+          iconTint="success"
+          title="Earnings"
+          subtitle="Your share of every completed order"
+          onPress={() => navigation.navigate('Earnings')}
+          showChevron
+        />
+        <ListRow
           icon="notifications"
           iconTint="warning"
           title="Notifications"

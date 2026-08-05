@@ -23,6 +23,9 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import fulfilmentRoutes from './routes/fulfilmentRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
+import videoRoutes from './routes/videoRoutes.js';
+import { webhookHandler as paymentWebhookHandler } from './controllers/paymentController.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +44,19 @@ app.use(
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
+);
+
+/**
+ * The payment webhook is mounted BEFORE the JSON parser and takes the raw body.
+ *
+ * Its signature covers the exact bytes the gateway sent. Parsing to an object
+ * and re-serialising changes key order and whitespace, so the HMAC would never
+ * match and every real webhook would be rejected as a forgery.
+ */
+app.post(
+  '/api/v1/payments/webhook',
+  express.raw({ type: '*/*', limit: '256kb' }),
+  paymentWebhookHandler
 );
 
 app.use(express.json({ limit: '1mb' }));
@@ -73,6 +89,8 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/inventory', inventoryRoutes);
 app.use('/api/v1/fulfilment', fulfilmentRoutes);
 app.use('/api/v1/health-content', healthRoutes);
+app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/video', videoRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

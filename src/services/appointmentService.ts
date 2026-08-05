@@ -3,6 +3,7 @@ import type { AppointmentType } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
+import { refundForTargetService } from './paymentService.js';
 
 const appointmentView = {
   id: true,
@@ -147,7 +148,7 @@ export const getDoctorAppointmentsService = (doctorId: string, limit = 100) =>
 
 /** Cancels an appointment and returns the slot to the pool. */
 export const cancelAppointmentService = async (appointmentId: string, patientId: string) => {
-  return prisma.$transaction(async (tx) => {
+  const cancelled = await prisma.$transaction(async (tx) => {
     const appointment = await tx.appointment.findUnique({
       where: { id: appointmentId },
       select: { id: true, patientId: true, slotId: true, status: true },
@@ -167,4 +168,11 @@ export const cancelAppointmentService = async (appointmentId: string, patientId:
       select: appointmentView,
     });
   });
+
+  // Outside the transaction: a refund is a network call to the gateway, and
+  // holding a database transaction open across one is how connection pools die.
+  // A no-op when the consultation was never paid for.
+  await refundForTargetService({ appointmentId }, 'Appointment cancelled by the patient.');
+
+  return cancelled;
 };
