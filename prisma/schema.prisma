@@ -15,7 +15,14 @@
 //     request and served through short-lived signed links.
 datasource db {
   provider = "postgresql"
+  /// Pooled endpoint (PgBouncer). Serverless Postgres suspends idle compute and
+  /// drops direct connections, which surfaces as a stream of "connection
+  /// forcibly closed" errors; the pooler absorbs that.
   url      = env("DATABASE_URL")
+  /// Unpooled. Schema changes are DDL, which PgBouncer's transaction mode
+  /// cannot run, so the CLI needs a direct connection. Falls back to
+  /// DATABASE_URL when unset, which is correct for a non-pooled host.
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {

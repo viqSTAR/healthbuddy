@@ -24,9 +24,17 @@ export const getRedisClient = (): Redis | null => {
       tls: env.REDIS_TLS === 'true' ? { servername: env.REDIS_HOST } : undefined,
       maxRetriesPerRequest: 2,
       lazyConnect: false,
+      // Managed Redis closes idle connections after a few minutes. Keeping the
+      // socket warm stops the reconnect churn that follows.
+      keepAlive: 30_000,
+      /**
+       * Never give up. The previous strategy returned null after five failures,
+       * which permanently retired the client — the process then silently served
+       * OTPs and rate limits from the process-local fallback for the rest of its
+       * life, and a restart was the only cure.
+       */
       retryStrategy(times: number) {
-        if (times > 5) return null;
-        return Math.min(times * 200, 2000);
+        return Math.min(times * 200, 5_000);
       },
     });
 
@@ -35,7 +43,18 @@ export const getRedisClient = (): Redis | null => {
     });
     redisClient.on('ready', () => {
       logger.info('[Redis] Connected.');
+      warnedAboutFallback = false;
     });
+
+    /**
+     * Heartbeat. Managed providers drop connections that sit idle, and a quiet
+     * development session is idle for minutes at a time. A periodic ping keeps
+     * the connection in use so it is alive when a request finally arrives.
+     */
+    const heartbeat = setInterval(() => {
+      redisClient?.ping().catch(() => undefined);
+    }, 60_000);
+    heartbeat.unref();
 
     return redisClient;
   } catch (err: any) {
