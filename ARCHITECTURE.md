@@ -251,6 +251,41 @@ broke, and it has six regression tests guarding it.
 | Checkout, split settlement, refunds, COD | `paymentService.ts`, `payment/provider.ts` |
 | Object storage on R2 / S3 | `utils/storage.ts` |
 | Video room minting + join authorisation | `videoService.ts` |
+| Stock ledger, reservations, expiry control | `stockService.ts` |
+| Uniform lab pricing by area | `inventoryService.ts` |
+
+### Stock: a ledger, not a number
+
+```
+PharmacyInventory.stock  ── running total, never edited directly
+PharmacyInventory.reserved ── promised to paid orders, not yet dispatched
+                sellable = stock − reserved
+
+every change is a StockMovement carrying a reason:
+  PURCHASE · RETURN            → adds
+  SALE_OFFLINE · EXPIRED · DAMAGED → removes
+  CORRECTION                   → whatever reconciles a recount
+  SALE_ONLINE · ORDER_CANCELLED → system, on dispatch and cancellation
+```
+
+A bare editable number cannot answer "we are 40 boxes short, what happened?",
+and in a pharmacy that question is the job. Reserving rather than deducting is
+what keeps the shelf count honest between payment and dispatch — the units are
+still physically there, they are just no longer sellable to anyone else.
+
+### Lab pricing: set by area, not by the lab
+
+```
+LabOffering   ── which tests a lab CAN run, and how fast (the lab's choice)
+LabTestPrice  ── what a test COSTS in an area (the platform's choice)
+
+resolution: state+city → state → national → LabPackage.price
+```
+
+A patient cannot judge sample handling the way they can judge a restaurant, so
+letting labs undercut each other selects for the cheapest handling rather than
+the best. One price per test per area means labs compete on turnaround and
+accreditation instead.
 
 ### Money: how a payment flows
 

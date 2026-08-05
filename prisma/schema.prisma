@@ -61,6 +61,30 @@ enum SlotStatus {
   BOOKED
 }
 
+/// Why stock moved.
+///
+/// Stock is not a number a shop edits — it is the running total of movements,
+/// each with a reason. A bare number cannot answer "we are 40 boxes short, what
+/// happened?", and that question is the whole job of an inventory system.
+enum StockMovementReason {
+  /// Received from a distributor.
+  PURCHASE
+  /// Physical recount. The delta is whatever reconciles the books.
+  CORRECTION
+  /// Dispatched against a platform order.
+  SALE_ONLINE
+  /// Sold over the counter, off-platform.
+  SALE_OFFLINE
+  /// Came back from a customer.
+  RETURN
+  /// Past its expiry date.
+  EXPIRED
+  /// Broken, contaminated, or a failed cold chain.
+  DAMAGED
+  /// A reservation released because the order was cancelled.
+  ORDER_CANCELLED
+}
+
 /// PENDING_PAYMENT exists so a partner never starts work on an order nobody has
 /// paid for. Prepaid orders sit here until the gateway confirms; cash-on-delivery
 /// orders skip it and are PLACED immediately.
@@ -743,15 +767,64 @@ model PharmacyInventory {
   medicineId   String
   medicine     Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
   price        Float
+  /// Physically on the shelf. Maintained by StockMovement — never edited
+  /// directly, so every change has a reason attached to it.
   stock        Int      @default(0)
+  /// Promised to paid orders that have not been dispatched yet. Sellable stock
+  /// is `stock - reserved`; without this, two customers can be sold the last box.
+  reserved     Int      @default(0)
   /// Alert threshold for the partner app's low-stock notification.
   reorderLevel Int      @default(10)
   isActive     Boolean  @default(true)
+
+  /// Current batch on the shelf. Kept here for the common case; the full
+  /// history lives on the movements.
+  batchNumber String?
+  expiryDate  DateTime?
+
   updatedAt    DateTime @updatedAt
+
+  movements StockMovement[]
 
   @@unique([pharmacyId, medicineId])
   @@index([medicineId])
   @@index([pharmacyId, isActive])
+  @@index([expiryDate])
+}
+
+/// One change to one shop's stock of one medicine.
+///
+/// Append-only. `balanceAfter` is recorded at write time so a statement can be
+/// read back without replaying the whole ledger, and so a discrepancy between
+/// the ledger and `PharmacyInventory.stock` is detectable rather than invisible.
+model StockMovement {
+  id          String            @id @default(uuid())
+  inventoryId String
+  inventory   PharmacyInventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  pharmacyId  String
+  medicineId  String
+
+  /// Signed: positive is stock in, negative is stock out.
+  delta        Int
+  reason       StockMovementReason
+  /// On-hand quantity immediately after this movement.
+  balanceAfter Int
+  note         String?
+
+  batchNumber String?
+  expiryDate  DateTime?
+
+  /// Set when a platform order caused this movement.
+  medicineOrderId String?
+  /// Who recorded it. Null for movements the system made itself.
+  actorUserId     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([pharmacyId, createdAt])
+  @@index([inventoryId, createdAt])
+  @@index([reason, createdAt])
+  @@index([medicineOrderId])
 }
 
 model MedicineOrder {
@@ -802,7 +875,7 @@ model LabPackage {
   id          String   @id @default(uuid())
   testName    String
   category    String
-  /// Reference price; the charged price comes from LabOffering.
+  /// National fallback, used when no LabTestPrice covers an area.
   price       Float
   sampleType  String
   fastingReq  Boolean  @default(false)
@@ -810,24 +883,58 @@ model LabPackage {
   createdAt   DateTime @default(now())
 
   offerings  LabOffering[]
+  prices     LabTestPrice[]
   prescribed PrescribedLabTest[]
 
   @@index([category])
 }
 
-/// Per-lab price for a catalogue test, plus what that lab charges to collect
-/// the sample from home.
-model LabOffering {
+/// What a test costs in an area. Set by the platform, not by the lab.
+///
+/// A patient cannot judge a blood test the way they can judge a restaurant, so
+/// letting labs price freely against each other selects for the cheapest
+/// sample handling rather than the best. One price per test per area means labs
+/// compete on turnaround, accreditation and service instead.
+///
+/// Resolution is most-specific-first: the patient's state and city, then the
+/// state alone, then the national row, then LabPackage.price. Empty string
+/// means "any" — a nullable column would not enforce uniqueness in Postgres,
+/// where NULLs are all distinct from one another.
+model LabTestPrice {
   id                String     @id @default(uuid())
-  labPartnerId      String
-  labPartner        LabPartner @relation(fields: [labPartnerId], references: [id], onDelete: Cascade)
   labPackageId      String
   labPackage        LabPackage @relation(fields: [labPackageId], references: [id], onDelete: Cascade)
+  /// "" means any state.
+  state             String     @default("")
+  /// "" means any city within `state`.
+  city              String     @default("")
   price             Float
   homeCollectionFee Float      @default(0)
-  turnaroundHours   Int        @default(24)
   isActive          Boolean    @default(true)
-  updatedAt         DateTime   @updatedAt
+  note              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([labPackageId, state, city])
+  @@index([labPackageId, isActive])
+}
+
+/// A test this lab can actually run.
+///
+/// Capability only. Labs add and remove these as their equipment changes, and
+/// set their own turnaround — but the price comes from LabTestPrice, so the
+/// same test costs the same across an area whichever lab fulfils it.
+model LabOffering {
+  id              String     @id @default(uuid())
+  labPartnerId    String
+  labPartner      LabPartner @relation(fields: [labPartnerId], references: [id], onDelete: Cascade)
+  labPackageId    String
+  labPackage      LabPackage @relation(fields: [labPackageId], references: [id], onDelete: Cascade)
+  turnaroundHours Int        @default(24)
+  /// Turned off when a machine is down, without losing the offering.
+  isActive        Boolean    @default(true)
+  updatedAt       DateTime   @updatedAt
 
   @@unique([labPartnerId, labPackageId])
   @@index([labPackageId])

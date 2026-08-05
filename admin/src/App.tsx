@@ -10,6 +10,8 @@ import { ApplicationDetail } from './pages/ApplicationDetail';
 import { Users } from './pages/Users';
 import { Emergency } from './pages/Emergency';
 import { AuditLog } from './pages/AuditLog';
+import { LabPricing } from './pages/LabPricing';
+import { StockLedger } from './pages/StockLedger';
 
 const Sidebar: React.FC = () => {
   const { user, signOut } = useAuth();
@@ -34,6 +36,12 @@ const Sidebar: React.FC = () => {
         </NavLink>
         <NavLink to="/users" className={link}>
           Users
+        </NavLink>
+        <NavLink to="/lab-pricing" className={link}>
+          Lab pricing
+        </NavLink>
+        <NavLink to="/stock" className={link}>
+          Stock ledger
         </NavLink>
         <NavLink to="/emergency" className={link}>
           Emergency
@@ -66,6 +74,8 @@ const Shell: React.FC = () => (
         <Route path="/applications" element={<Applications />} />
         <Route path="/applications/:id" element={<ApplicationDetail />} />
         <Route path="/users" element={<Users />} />
+        <Route path="/lab-pricing" element={<LabPricing />} />
+        <Route path="/stock" element={<StockLedger />} />
         <Route path="/emergency" element={<Emergency />} />
         <Route path="/audit" element={<AuditLog />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -253,6 +253,8 @@ async function main() {
       create: { userId: user.id, ...profile },
     });
 
+    // A capability, not a price list. Labs differ in equipment, so which tests
+    // they run is theirs to decide; the price is set per area below.
     for (const pkg of packages) {
       await prisma.labOffering.upsert({
         where: {
@@ -262,9 +264,44 @@ async function main() {
         create: {
           labPartnerId: lab.id,
           labPackageId: pkg.id,
-          price: Math.round(pkg.price * l.markup),
-          homeCollectionFee: l.nabl ? 0 : 99,
           turnaroundHours: l.nabl ? 24 : 36,
+        },
+      });
+    }
+  }
+
+  /**
+   * Area price bands.
+   *
+   * A national row every test falls back to, plus two city bands so the
+   * most-specific-wins resolution is exercised by the seed data: the same test
+   * costs more in Mumbai than in Delhi, and identically at every lab within
+   * each city.
+   */
+  const PRICE_BANDS: { state: string; city: string; factor: number; collection: number }[] = [
+    { state: '', city: '', factor: 1.0, collection: 99 },
+    { state: 'Maharashtra', city: 'Mumbai', factor: 1.15, collection: 0 },
+    { state: 'Delhi', city: 'Delhi', factor: 0.9, collection: 49 },
+  ];
+
+  for (const pkg of packages) {
+    for (const band of PRICE_BANDS) {
+      await prisma.labTestPrice.upsert({
+        where: {
+          labPackageId_state_city: {
+            labPackageId: pkg.id,
+            state: band.state,
+            city: band.city,
+          },
+        },
+        update: {},
+        create: {
+          labPackageId: pkg.id,
+          state: band.state,
+          city: band.city,
+          price: Math.round(pkg.price * band.factor),
+          homeCollectionFee: band.collection,
+          note: band.city ? `${band.city} rate` : 'National standard rate',
         },
       });
     }

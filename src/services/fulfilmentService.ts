@@ -4,6 +4,8 @@ import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { recordAudit } from './auditService.js';
 import { createCheckoutService } from './paymentService.js';
+import { resolveTestPriceService } from './inventoryService.js';
+import { reserveStockForOrder } from './stockService.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -96,22 +98,33 @@ const quoteMedicine = async (
   return { price: offer.price, pharmacyId: offer.pharmacy.id, pharmacyName: offer.pharmacy.name };
 };
 
-/** Cheapest active lab offering the test. */
+/**
+ * Picks a lab for a test and prices it from the area band.
+ *
+ * There is no cheapest lab to find any more — every lab in an area charges the
+ * same for a test — so the choice is made on turnaround, then accreditation.
+ * That is the ordering a patient would actually want if they knew to ask.
+ */
 const quoteLabTest = async (labPackageId: string) => {
   const offer = await prisma.labOffering.findFirst({
     where: { labPackageId, isActive: true, labPartner: { isActive: true } },
-    orderBy: { price: 'asc' },
+    orderBy: [{ turnaroundHours: 'asc' }],
     select: {
-      price: true,
-      homeCollectionFee: true,
-      labPartner: { select: { id: true, name: true } },
+      labPartner: { select: { id: true, name: true, state: true, city: true } },
     },
   });
 
   if (!offer) return null;
+
+  const resolved = await resolveTestPriceService(labPackageId, {
+    state: offer.labPartner.state,
+    city: offer.labPartner.city,
+  });
+  if (!resolved) return null;
+
   return {
-    price: offer.price,
-    homeCollectionFee: offer.homeCollectionFee,
+    price: resolved.price,
+    homeCollectionFee: resolved.homeCollectionFee,
     labPartnerId: offer.labPartner.id,
     labPartnerName: offer.labPartner.name,
   };
@@ -429,6 +442,26 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
         },
       });
       created.medicineOrderId = order.id;
+
+      /**
+       * Hold the stock now rather than at payment.
+       *
+       * Payment normally follows consent within seconds, and reserving here is
+       * what stops two patients being promised the last box in that window.
+       * Best-effort: the basket was priced against stock that existed, so a
+       * failure here means it moved in the meantime — the order still stands
+       * and the pharmacy can cancel it with a reason, which is better than
+       * discarding a consent the patient already gave.
+       */
+      if (pharmacyId) {
+        const held = await reserveStockForOrder(
+          pharmacyId,
+          chosenMedicines.map((m) => ({ medicineId: m.medicineId, quantity: m.quantity }))
+        );
+        if (!held.reserved) {
+          logger.warn(`[fulfilment] could not reserve stock for order ${order.id}: ${held.shortfall}`);
+        }
+      }
     }
 
     for (const test of chosenTests) {

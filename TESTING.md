@@ -235,7 +235,8 @@ flagged as a follow-up and List B becomes available.
 1. **Partner app** as `+15552000001` → *Stock*.
 2. **Add item** → search the catalogue. Try adding **Alprazolam** (Schedule X) →
    refused: cannot be sold online.
-3. Add an OTC medicine, set your own price and stock.
+3. Add an OTC medicine, set your price, opening stock, batch and expiry. Pricing
+   above the printed MRP is refused.
 4. **Patient app** → order that medicine.
 5. Partner app → *Orders* → **Accept order** → advance it through packing →
    dispatched → delivered.
@@ -243,6 +244,67 @@ flagged as a follow-up and List B becomes available.
 
 Per-partner pricing: sign in as `+15552000002` (the second pharmacy) and set a
 different price for the same medicine. Both are valid simultaneously.
+
+### C2. The stock ledger
+
+**Stock is never a number you type over.** Tap any medicine in *Stock* and the
+modal opens with four tabs.
+
+**Record** — pick what happened, then type the quantity as a number. Forty
+expired strips is one entry, not forty taps on a minus button.
+
+| Reason | Direction |
+| --- | --- |
+| Stock received | adds |
+| Customer return | adds |
+| Sold at the counter | removes |
+| Expired | removes |
+| Damaged | removes |
+
+The reason decides the direction, so "expired: 25" can never be entered as +25
+and invent stock that was never on the shelf.
+
+**Recount** — enter what you physically counted. The *difference* is recorded,
+not an overwrite, so a shortfall of 12 stays visible instead of being erased.
+
+**History** — every movement with its reason and the balance it left behind.
+This is the point of the whole thing: "we are 40 short" now has an answer.
+
+Worth checking:
+
+- Three numbers at the top: **on the shelf**, **reserved**, **sellable**
+- Place an order as a patient → the shop's *reserved* goes up but *on the shelf*
+  does not. The boxes are still there; they are just promised to someone
+- With units reserved, try to recount to zero → refused. You cannot make the
+  numbers work by cancelling someone's paid order
+- Mark the order dispatched → reserved drops and stock drops together, logged as
+  a sale
+- Cancel it instead → the reservation is released and the units are sellable again
+- **Expiring** filter shows anything within 90 days. Expired stock is never
+  offered to a patient, regardless of what the count says
+
+### C3. Lab pricing is uniform per area
+
+Sign in to the **partner app** as a lab (`+15553000001`, Mumbai) → *Tests*.
+
+There is **no price field**. A lab chooses which tests it can run and how fast
+it turns them around; the price is set per area by the platform. That is
+deliberate — a patient cannot judge sample handling the way they can judge a
+restaurant, so free price competition on an invisible quality selects for the
+cheapest handling rather than the best.
+
+Check it:
+
+1. Patient app → *Labs* → open a test → both Mumbai labs quote the **same**
+   price
+2. Sign in as `+15553000002` (Delhi) → the same test, a **different** price,
+   because Delhi is a different band
+3. Admin panel → **Lab pricing** → add a band for your own city. Most specific
+   wins: city → state → national → catalogue reference
+4. A city band without a state is refused — there is more than one Hyderabad
+
+Admin panel → **Stock ledger** shows write-offs across every pharmacy, which is
+where shrinkage would otherwise hide.
 
 ### D. Lab: booking → sample → report
 

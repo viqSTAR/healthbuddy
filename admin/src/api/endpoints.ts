@@ -210,3 +210,95 @@ export const documentUrl = async (documentId: string): Promise<string> => {
   const origin = API_BASE_URL.replace(/\/api\/v1$/, '');
   return `${origin}${link.url}`;
 };
+
+/* ---------- Lab pricing by area ---------- */
+
+export interface LabPackageRow {
+  id: string;
+  testName: string;
+  category: string;
+  price: number;
+  sampleType: string;
+}
+
+export const fetchLabPackages = async () =>
+  (await api.get<{ packages: LabPackageRow[] }>('/labs/packages', { params: { limit: 100 } })).data
+    .packages;
+
+export interface TestPriceBand {
+  id: string;
+  labPackageId: string;
+  testName: string;
+  category: string;
+  cataloguePrice: number;
+  state: string;
+  city: string;
+  /** Human-readable scope, e.g. "Mumbai, Maharashtra" or "All of India". */
+  scope: string;
+  price: number;
+  homeCollectionFee: number;
+  isActive: boolean;
+  note: string | null;
+  updatedAt: string;
+}
+
+export const fetchTestPrices = async (labPackageId?: string) =>
+  (
+    await api.get<{ prices: TestPriceBand[] }>('/inventory/test-prices', {
+      params: labPackageId ? { labPackageId } : undefined,
+    })
+  ).data.prices;
+
+export const upsertTestPrice = async (payload: {
+  labPackageId: string;
+  state?: string;
+  city?: string;
+  price: number;
+  homeCollectionFee?: number;
+  isActive?: boolean;
+  note?: string;
+}) => (await api.put<{ price: TestPriceBand }>('/inventory/test-prices', payload)).data.price;
+
+export const removeTestPrice = async (id: string) =>
+  (await api.delete(`/inventory/test-prices/${id}`)).data;
+
+/* ---------- Stock oversight ---------- */
+
+export type StockMovementReason =
+  | 'PURCHASE'
+  | 'CORRECTION'
+  | 'SALE_ONLINE'
+  | 'SALE_OFFLINE'
+  | 'RETURN'
+  | 'EXPIRED'
+  | 'DAMAGED'
+  | 'ORDER_CANCELLED';
+
+export interface StockMovement {
+  id: string;
+  medicineId: string;
+  medicineName: string;
+  pharmacyId: string;
+  pharmacyName: string;
+  delta: number;
+  reason: StockMovementReason;
+  balanceAfter: number;
+  note: string | null;
+  batchNumber: string | null;
+  expiryDate: string | null;
+  medicineOrderId: string | null;
+  createdAt: string;
+}
+
+/** Every write-off across every pharmacy — the point is that they are visible. */
+export const fetchStockMovements = async (params?: {
+  pharmacyId?: string;
+  reason?: StockMovementReason;
+  page?: number;
+  limit?: number;
+}) =>
+  (
+    await api.get<{ movements: StockMovement[]; total: number }>('/inventory/admin/movements', {
+      params,
+    })
+  ).data;

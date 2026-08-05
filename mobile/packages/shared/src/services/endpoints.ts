@@ -96,23 +96,88 @@ export interface InventoryItem {
   pharmacyId: string;
   medicineId: string;
   price: number;
+  /** Physically on the shelf. */
   stock: number;
+  /** Promised to paid orders not yet dispatched. Sellable = stock − reserved. */
+  reserved: number;
   reorderLevel: number;
   isActive: boolean;
+  batchNumber: string | null;
+  expiryDate: string | null;
   updatedAt: string;
   medicine: Medicine;
 }
 
+/**
+ * Why stock moved. Stock is never edited directly — it is the running total of
+ * these, so every unit that appears or disappears has a reason attached.
+ */
+export type StockMovementReason =
+  | 'PURCHASE'
+  | 'CORRECTION'
+  | 'SALE_ONLINE'
+  | 'SALE_OFFLINE'
+  | 'RETURN'
+  | 'EXPIRED'
+  | 'DAMAGED'
+  | 'ORDER_CANCELLED';
+
+export interface StockMovement {
+  id: string;
+  medicineId: string;
+  medicineName: string;
+  pharmacyId: string;
+  pharmacyName: string;
+  /** Signed: positive is stock in, negative is stock out. */
+  delta: number;
+  reason: StockMovementReason;
+  balanceAfter: number;
+  note: string | null;
+  batchNumber: string | null;
+  expiryDate: string | null;
+  medicineOrderId: string | null;
+  createdAt: string;
+}
+
+export interface ExpiringStockItem {
+  medicineId: string;
+  medicineName: string;
+  stock: number;
+  batchNumber: string | null;
+  expiryDate: string | null;
+  expired: boolean;
+  daysLeft: number | null;
+}
+
+/**
+ * A test this lab can run. Capability only — the price comes from the area
+ * band, so the same test costs the same whichever lab fulfils it.
+ */
 export interface LabOfferingItem {
   id: string;
   labPartnerId: string;
   labPackageId: string;
-  price: number;
-  homeCollectionFee: number;
   turnaroundHours: number;
   isActive: boolean;
   updatedAt: string;
   labPackage: LabPackage;
+}
+
+export interface TestPriceBand {
+  id: string;
+  labPackageId: string;
+  testName: string;
+  category: string;
+  cataloguePrice: number;
+  state: string;
+  city: string;
+  /** Human-readable scope, e.g. "Mumbai, Maharashtra" or "All of India". */
+  scope: string;
+  price: number;
+  homeCollectionFee: number;
+  isActive: boolean;
+  note: string | null;
+  updatedAt: string;
 }
 
 export interface OrderItem {
@@ -480,18 +545,75 @@ export const fetchInventory = async (params?: {
     })
   ).data;
 
+/**
+ * Lists a medicine, or edits how it is listed.
+ *
+ * `stock` applies only when the item is first added. After that stock moves
+ * through `recordStockMovement` or `setStock`, so every change carries a reason.
+ */
 export const upsertInventoryItem = async (payload: {
   medicineId: string;
   price: number;
-  stock: number;
+  stock?: number;
   reorderLevel?: number;
   isActive?: boolean;
+  batchNumber?: string;
+  expiryDate?: string;
 }) => (await api.put<{ item: InventoryItem }>('/inventory/pharmacy', payload)).data.item;
 
-export const adjustStock = async (medicineId: string, delta: number) =>
-  (await api.patch<{ item: InventoryItem }>(`/inventory/pharmacy/${medicineId}/stock`, { delta }))
-    .data.item;
+export interface StockChangeResult {
+  medicineId: string;
+  stock: number;
+  delta: number;
+  reason: StockMovementReason;
+}
 
+/**
+ * Records a stock movement. `quantity` is always positive — the reason decides
+ * the direction, so "expired: 25" cannot be entered as +25 by mistake.
+ */
+export const recordStockMovement = async (
+  medicineId: string,
+  payload: {
+    quantity: number;
+    reason: Extract<
+      StockMovementReason,
+      'PURCHASE' | 'SALE_OFFLINE' | 'RETURN' | 'EXPIRED' | 'DAMAGED'
+    >;
+    note?: string;
+    batchNumber?: string;
+    expiryDate?: string;
+  }
+) =>
+  (await api.post<StockChangeResult>(`/inventory/pharmacy/${medicineId}/movements`, payload)).data;
+
+/** Physical recount. The difference is recorded, not the overwrite. */
+export const setStock = async (
+  medicineId: string,
+  payload: { countedQuantity: number; note?: string; batchNumber?: string; expiryDate?: string }
+) => (await api.put<StockChangeResult>(`/inventory/pharmacy/${medicineId}/stock`, payload)).data;
+
+export const fetchStockMovements = async (params?: {
+  medicineId?: string;
+  reason?: StockMovementReason;
+  page?: number;
+  limit?: number;
+}) =>
+  (
+    await api.get<{ movements: StockMovement[]; total: number }>('/inventory/pharmacy/movements', {
+      params,
+    })
+  ).data;
+
+/** Stock that is expired or close to it — the thing that must never be sold. */
+export const fetchExpiringStock = async (withinDays = 90) =>
+  (
+    await api.get<{ items: ExpiringStockItem[] }>('/inventory/pharmacy/expiring', {
+      params: { withinDays },
+    })
+  ).data.items;
+
+/** Delists rather than deletes — the movement history is the shop's record. */
 export const removeInventoryItem = async (medicineId: string) =>
   (await api.delete(`/inventory/pharmacy/${medicineId}`)).data;
 
@@ -502,10 +624,15 @@ export const fetchLabOfferings = async (params?: {
 }) =>
   (await api.get<{ items: LabOfferingItem[]; total: number }>('/inventory/lab', { params })).data;
 
+/**
+ * Adds or updates a test this lab can run.
+ *
+ * Deliberately no price: which tests a lab offers depends on its equipment and
+ * is its own decision, but the price is set per area by the platform so the
+ * same test costs the same across an area whichever lab fulfils it.
+ */
 export const upsertLabOffering = async (payload: {
   labPackageId: string;
-  price: number;
-  homeCollectionFee?: number;
   turnaroundHours?: number;
   isActive?: boolean;
 }) => (await api.put<{ offering: LabOfferingItem }>('/inventory/lab', payload)).data.offering;
@@ -513,13 +640,49 @@ export const upsertLabOffering = async (payload: {
 export const removeLabOffering = async (labPackageId: string) =>
   (await api.delete(`/inventory/lab/${labPackageId}`)).data;
 
-/** Which pharmacies stock a medicine, cheapest first. */
+/** Area price bands. Readable by anyone signed in; only an admin may change them. */
+export const fetchTestPrices = async (labPackageId?: string) =>
+  (
+    await api.get<{ prices: TestPriceBand[] }>('/inventory/test-prices', {
+      params: labPackageId ? { labPackageId } : undefined,
+    })
+  ).data.prices;
+
+export const upsertTestPrice = async (payload: {
+  labPackageId: string;
+  state?: string;
+  city?: string;
+  price: number;
+  homeCollectionFee?: number;
+  isActive?: boolean;
+  note?: string;
+}) => (await api.put<{ price: TestPriceBand }>('/inventory/test-prices', payload)).data.price;
+
+export const removeTestPrice = async (id: string) =>
+  (await api.delete(`/inventory/test-prices/${id}`)).data;
+
+/** Platform-wide stock movements, so write-offs are visible rather than silent. */
+export const fetchAllStockMovements = async (params?: {
+  pharmacyId?: string;
+  medicineId?: string;
+  reason?: StockMovementReason;
+  page?: number;
+  limit?: number;
+}) =>
+  (
+    await api.get<{ movements: StockMovement[]; total: number }>('/inventory/admin/movements', {
+      params,
+    })
+  ).data;
+
+/** Which pharmacies can actually supply a medicine, cheapest first. */
 export const fetchMedicineOffers = async (medicineId: string) =>
   (
     await api.get<{
       offers: {
         price: number;
         stock: number;
+        available: number;
         pharmacy: { id: string; name: string; city: string | null; deliveryRadiusKm: number };
       }[];
     }>(`/inventory/offers/medicine/${medicineId}`)
@@ -531,6 +694,8 @@ export const fetchLabOffers = async (labPackageId: string) =>
       offers: {
         price: number;
         homeCollectionFee: number;
+        /** Which band supplied the price, e.g. "Mumbai". */
+        priceArea: string | null;
         turnaroundHours: number;
         labPartner: {
           id: string;

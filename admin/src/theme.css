@@ -555,3 +555,46 @@ textarea {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* Two fields side by side, stacking on a narrow window. */
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+}
+
+/* A checkbox reads as one line, not a stacked field. */
+.checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+  margin-bottom: 14px;
+}
+.checkbox input {
+  width: auto;
+  margin: 0;
+}
+
+/* Standalone labels inside a card form, matching .form-row's fields. */
+.card > form > label,
+form.card > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+}
