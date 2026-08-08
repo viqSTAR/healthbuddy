@@ -366,3 +366,61 @@ then the admin panel dispatches and the patient dials directly.
 
 Launching without 2 and 4 means a platform that cannot take money and cannot
 tell you when it breaks.
+
+---
+
+## 12. Production cutover
+
+The development credentials are fine while the database holds seeded fixtures.
+The trigger to replace them is **the first real patient record**, not launch day
+— a pilot with five real users is enough to make it matter.
+
+Work through this in order. Nothing here is optional once real people are on it.
+
+### Credentials — all new, none reused
+
+| What | Where | Why it cannot be reused |
+| --- | --- | --- |
+| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | `openssl rand -hex 32` | **Reuse them and a token minted on a laptop is valid in production.** Rotate these even if you keep everything else |
+| `DATABASE_URL` / `DIRECT_URL` | A new Neon project, not a new password on the old one | The dev database holds test patients; you do not want them in the same instance as real records |
+| `REDIS_*` | A new Upstash database | Holds OTPs and rate-limit state |
+| R2 token | A new token scoped to a **production bucket** | Keeps dev uploads out of the bucket holding real licences |
+
+Rotating a JWT secret signs every existing session out. Do it during the
+cutover, not afterwards.
+
+### Configuration that must change
+
+```
+NODE_ENV=production
+EXPOSE_DEV_OTP=false        # returns the OTP in the response — catastrophic live
+SMS_PROVIDER=twilio|msg91   # "mock" delivers nothing
+PAYMENT_PROVIDER=razorpay   # "mock" marks orders paid without collecting
+STORAGE_DRIVER=r2           # "local" is wiped on every redeploy
+VIDEO_PROVIDER=daily|jitsi
+CORS_ORIGINS=https://…      # explicit list, no wildcard
+```
+
+The app refuses to boot if any of these is still set to a development value
+while `NODE_ENV=production`. That check is deliberate — every one of them fails
+silently and expensively rather than loudly.
+
+### Before the first real user
+
+- **Prisma migrations**, not `db push`. There is no rollback from `db push` on a
+  database with real records in it
+- **Sentry or equivalent**, or you find out about failures from patients
+- **`npm run storage:check`** against the production bucket
+- A **restore test**: take a backup, restore it somewhere, confirm it works.
+  An untested backup is a hope, not a backup
+- Confirm the R2 bucket is still private — `storage:check` covers this
+- **Set `TZ=Asia/Kolkata`** on the server. Slot times are stored as local
+  `HH:mm`, so a server on UTC opens a 10:00 consultation at the wrong hour
+
+### Regulatory, before taking money or prescribing
+
+- Razorpay Route live mode, with each partner onboarded as a linked account
+- Retention and deletion policy under the DPDP Act, plus a way for a patient to
+  export and delete their record
+- The video provider's data-processing terms — `meet.jit.si` is not an
+  appropriate host for clinical calls at any real volume
