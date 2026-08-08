@@ -85,13 +85,37 @@ export const prisma = basePrisma.$extends({
  * failure and logged a "notice", so the process started healthy-looking and
  * every request failed later.
  */
+/**
+ * Verifies the database is reachable at boot.
+ *
+ * Retries first: serverless Postgres suspends its compute when idle, so a cold
+ * start is a normal condition rather than a fault, and giving up on the first
+ * attempt means a deploy after a quiet night fails for no reason. Still fails
+ * loudly once the attempts run out — this previously swallowed the error and
+ * logged a "notice", so the process started healthy-looking and every request
+ * failed later.
+ */
 export const connectDatabase = async (): Promise<void> => {
-  try {
-    await basePrisma.$connect();
-    logger.info('PostgreSQL connected.');
-  } catch (err: any) {
-    logger.error(`PostgreSQL connection failed: ${err.message}`);
-    throw err;
+  const delays = [500, 1500, 3000, 5000];
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await basePrisma.$connect();
+      // A connection can be handed over before the compute is truly serving, so
+      // prove it with a real query.
+      await basePrisma.$queryRaw`SELECT 1`;
+      logger.info('PostgreSQL connected.');
+      return;
+    } catch (err: any) {
+      if (attempt >= delays.length) {
+        logger.error(`PostgreSQL connection failed: ${err.message}`);
+        throw err;
+      }
+      logger.warn(
+        `PostgreSQL not reachable yet (attempt ${attempt + 1}/${delays.length + 1}) — the compute may be waking up.`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]!));
+    }
   }
 };
 
