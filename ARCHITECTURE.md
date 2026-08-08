@@ -243,7 +243,7 @@ broke, and it has six regression tests guarding it.
 | Push + in-app notification feed | `notificationService.ts` |
 | Audit log of privileged actions | `auditService.ts` |
 | Licence expiry tracking + auto-suspension | `applicationService.ts` |
-| Admin panel: review, users, emergency, audit | `admin/src/pages/` |
+| Admin panel: people, operations, money, catalogue, governance | `admin/src/pages/`, `adminOpsService.ts` |
 | Prescription → order with patient consent | `fulfilmentService.ts` |
 | Image-based consultation | `documentService.ts` |
 | Condition-matched health notifications | `healthContentService.ts` |
@@ -343,7 +343,18 @@ Both are already anticipated in the data model, so neither needs a migration:
 
 **Delivery rider app.** `MedicineOrder.assignedAgentUserId` exists. A rider app
 would consume assigned orders, update status, and capture proof of delivery.
-Until then partner staff self-assign.
+Until then partner staff self-assign, and the admin panel's *Deliveries* board
+tracks the work — four lanes with age-in-stage, and a roster derived from who is
+actually carrying orders rather than from a riders table.
+
+What a real rider role would need beyond the column that already exists: a
+`RIDER` value on `Role` and a rider profile carrying vehicle and licence
+details; a registration and verification flow reusing `ProviderApplication`; a
+rider app with background location so a patient can watch the pin move; and
+cash-on-delivery reconciliation, since a rider holding cash is the one case
+where the platform *is* briefly in the money path and has to settle it. That
+last part is the reason this is a product rather than a screen — the rest is
+comparatively mechanical.
 
 **Ambulance operator app.** `EmergencySOS` already has status transitions and
 coordinates. An operator app would claim a request and stream location. Until

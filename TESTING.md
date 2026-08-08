@@ -429,10 +429,92 @@ Worth checking:
 
 ### G. Admin panel
 
-- *Overview* — live counts, pending queue, licences expiring within 60 days
-- *Users* — suspend a partner and watch their shop deactivate
-- *Emergency* — trigger an SOS from the patient app and watch it appear
-- *Audit* — every approval, suspension and document read is recorded
+Sign in at http://localhost:5173 as `+15559000001`. The sidebar is grouped by
+what you are doing rather than by which table a page reads.
+
+**Overview**
+
+- *Dashboard* — the top block is only what needs a person: open emergencies,
+  unreviewed applications, unprocessed webhooks, licences and stock about to
+  lapse. It is empty when nothing is wrong, and every tile navigates to the
+  filtered list behind it. Money and population counts sit below it.
+- *Verification queue* — approve or reject a provider application.
+- *Emergency* — trigger an SOS from the patient app and watch it appear.
+
+**People** — each row opens a drawer beside the list, so you keep your filter
+and your place in the queue.
+
+- *Patients* — search by **phone number**, which is all a caller can give you.
+  The drawer tabs through consults, orders, lab tests and payments. It shows no
+  diagnosis, prescription or result, and the endpoint behind it does not read
+  them.
+- *Doctors* — take one offline, change the fee or commission, link a payout
+  account, mark verified. Qualification, specialty and council number are
+  **not** editable: they came from reviewed documents.
+- *Pharmacies* — licence number and expiry (with days remaining), delivery
+  radius, commission, payout account. The *Stock* tab is read-only — stock only
+  moves through the ledger. The *write-offs* summary breaks out expiry, damage,
+  recounts and offline sales.
+- *Labs* — accreditation, home collection, terms, and the tests they offer.
+  Suspend an offering when a machine is down. Price is **not** here: one price
+  per test per area lives under *Lab pricing*.
+
+**Operations**
+
+- *Consultations* — who saw whom, whether it started, whether it was paid for
+  and whether a prescription came out. A video room shows as "Room created"
+  and never prints its id, because a room name is a bearer credential.
+- *Medicine orders* — filter by status, or by "nobody carrying it". Opening one
+  shows items, payment with its settlement legs, and the stock movements it
+  caused. **Cancelling refunds the customer, releases the reservation and
+  notifies them** — the same path a pharmacy's own cancellation takes, and it
+  requires a reason.
+- *Lab bookings* — the column worth watching is *Report*: a booking marked
+  COMPLETED with no document attached shows red.
+- *Deliveries* — the dispatch board. Four lanes with age-in-stage, and anything
+  unaccepted for over half an hour turns red. Click a job to hand it to an
+  account. See the note below about riders.
+
+**Money**
+
+- *Payments* — every charge, filterable by status, purpose and method. The
+  detail view leads with **reconciliation**: the settlement legs must add up to
+  exactly what the payer was charged. Splits are computed in whole paise with
+  the platform absorbing the remainder, so a difference is a defect, not
+  rounding, and it renders as a red banner.
+- *Gateway webhooks* — defaults to showing only unprocessed or errored events.
+  An unprocessed row means money moved at the gateway and did not move here.
+
+**Catalogue**
+
+- *Medicines & tests* — adding or reclassifying a drug is audited **with its
+  previous schedule and telemedicine list**, because "who reclassified this as
+  OTC" is a question that will eventually be asked by someone who is not an
+  engineer. Selecting a non-OTC schedule forces "requires prescription" on;
+  Schedule X and narcotics show a blocking warning.
+- *Lab pricing* — one price per test per area, resolved most-specific-first.
+- *Stock ledger* — write-offs across every pharmacy.
+
+**Governance**
+
+- *Audit log* — every approval, suspension, cancellation, reclassification and
+  document read, with the actor and their reason.
+
+> **On riders.** There is no rider account type on the platform. Orders carry an
+> `assignedAgentUserId`, which is what the partner apps already write to, so the
+> *Deliveries* board tracks delivery **work** and derives its roster from who is
+> actually carrying orders. A real rider role is a product, not a screen — a
+> registration and verification flow, a rider app with live location, cash-on-
+> delivery reconciliation, and shift and payout rules. Building the roster UI
+> first would give you an empty list that looks broken and buttons that write to
+> nothing.
+
+**Two things to try that should fail:**
+
+1. Sign in to the panel as a patient or a partner — you get the login screen,
+   and every endpoint refuses the token with a 403 independently.
+2. Save a doctor's form without changing anything — rejected, because an empty
+   patch usually means the form serialised nothing and you think you saved.
 
 ---
 
