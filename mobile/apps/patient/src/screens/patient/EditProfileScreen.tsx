@@ -1,19 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import {
+  Alert,
   Button,
   Card,
-  ErrorState,
-  Input,
-  Loading,
-  Screen,
-  Text,
-  TopBar,
   colors,
   errorMessage,
+  ErrorState,
   fetchMyProfile,
+  Input,
+  Loading,
   radius,
+  Screen,
   spacing,
+  Text,
+  TopBar,
   updateMyProfile,
   useAsync,
 } from '@healthbuddy/shared';

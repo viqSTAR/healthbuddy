@@ -20,6 +20,12 @@ export type { ProviderGate } from './hooks/useProviderApplication';
 
 /* Networking */
 export { api, API_BASE_URL, errorMessage, setSessionExpiredHandler } from './services/api';
+/**
+ * Import Alert from here, never from 'react-native': react-native-web ships it
+ * as a no-op, so on web every message is discarded and every confirmation
+ * silently does nothing.
+ */
+export { Alert, type AlertButton } from './services/alert';
 export * from './services/endpoints';
 
 /* Auth */

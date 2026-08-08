@@ -1,25 +1,26 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Linking, Alert } from 'react-native';
+import { View, StyleSheet, Linking } from 'react-native';
 import {
+  Alert,
   Avatar,
   Badge,
   Button,
   Card,
+  colors,
+  endConsultation,
+  errorMessage,
   ErrorState,
+  fetchDoctorQueue,
   Icon,
+  joinConsultation,
   ListRow,
   Loading,
   Screen,
   SectionHeader,
+  spacing,
   StatusPill,
   Text,
   TopBar,
-  colors,
-  endConsultation,
-  errorMessage,
-  fetchDoctorQueue,
-  joinConsultation,
-  spacing,
   useAsync,
 } from '@healthbuddy/shared';
 

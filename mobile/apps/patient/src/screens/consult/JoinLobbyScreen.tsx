@@ -1,19 +1,20 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Pressable, Alert, Linking } from 'react-native';
+import { View, StyleSheet, Pressable, Linking } from 'react-native';
 import {
+  Alert,
   Avatar,
   Badge,
   Button,
   Card,
-  Icon,
-  Screen,
-  Text,
-  TopBar,
   colors,
   errorMessage,
+  Icon,
   joinConsultation,
   radius,
+  Screen,
   spacing,
+  Text,
+  TopBar,
 } from '@healthbuddy/shared';
 
 /** Mirrors `join_meeting_lobby`: preview tile, device toggles, join CTA. */

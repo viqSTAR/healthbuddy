@@ -1,22 +1,23 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
+  Alert,
   Button,
   Card,
-  DocumentUploader,
-  Icon,
-  Input,
-  Screen,
-  SectionHeader,
-  Text,
-  TopBar,
   colors,
+  DocumentUploader,
   errorMessage,
   fetchMyApplications,
+  Icon,
+  Input,
   radius,
   saveApplication,
+  Screen,
+  SectionHeader,
   spacing,
   submitApplication,
+  Text,
+  TopBar,
   useAuth,
   type ProviderApplication,
 } from '@healthbuddy/shared';

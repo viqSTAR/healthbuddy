@@ -1,21 +1,22 @@
 import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, Pressable, Alert, Linking, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Pressable, Linking, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
 import {
+  Alert,
   Avatar,
   Badge,
   Button,
   Card,
-  Icon,
-  Screen,
-  SectionHeader,
-  Text,
-  TopBar,
   colors,
   errorMessage,
   fetchDoctors,
+  Icon,
   radius,
+  Screen,
+  SectionHeader,
   spacing,
+  Text,
+  TopBar,
   triggerSOS,
   useAsync,
   type EmergencySOS,

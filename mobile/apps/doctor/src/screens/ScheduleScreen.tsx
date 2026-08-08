@@ -1,27 +1,28 @@
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import {
+  Alert,
   Badge,
   Button,
   Card,
   Chip,
   ChipRow,
-  EmptyState,
-  ErrorState,
-  Icon,
-  Input,
-  Loading,
-  Screen,
-  SectionHeader,
-  Text,
-  TopBar,
   colors,
   createSlots,
   deleteSlot,
+  EmptyState,
   errorMessage,
+  ErrorState,
   fetchMySchedule,
+  Icon,
+  Input,
+  Loading,
   radius,
+  Screen,
+  SectionHeader,
   spacing,
+  Text,
+  TopBar,
   useAsync,
 } from '@healthbuddy/shared';
 

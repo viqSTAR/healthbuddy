@@ -1,23 +1,24 @@
 import React, { useState, useMemo } from 'react';
-import { View, StyleSheet, Pressable, Alert, TextInput } from 'react-native';
+import { View, StyleSheet, Pressable, TextInput } from 'react-native';
 import {
+  Alert,
   Avatar,
+  bookAppointment,
   Button,
   Card,
-  EmptyState,
-  ErrorState,
-  Icon,
-  Loading,
-  Screen,
-  Text,
-  TopBar,
-  bookAppointment,
   colors,
+  EmptyState,
   errorMessage,
+  ErrorState,
   fetchDoctor,
   fetchDoctorSlots,
+  Icon,
+  Loading,
   radius,
+  Screen,
   spacing,
+  Text,
+  TopBar,
   typography,
   useAsync,
 } from '@healthbuddy/shared';

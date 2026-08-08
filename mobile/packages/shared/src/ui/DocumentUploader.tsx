@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable, Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Text } from './Text';
@@ -8,6 +8,8 @@ import { Badge } from './Badge';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/typography';
 import { errorMessage } from '../services/api';
+// Relative, not '@healthbuddy/shared': this file IS the shared package.
+import { Alert } from '../services/alert';
 import {
   uploadDocument,
   deleteDocument,
@@ -68,36 +70,45 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
   };
 
   const pickFile = async () => {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ['image/*', 'application/pdf'],
-      copyToCacheDirectory: true,
-    });
-    const asset = result.assets?.[0];
-    if (result.canceled || !asset) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/*', 'application/pdf'],
+        copyToCacheDirectory: true,
+      });
+      const asset = result.assets?.[0];
+      if (result.canceled || !asset) return;
 
-    await send({
-      uri: asset.uri,
-      name: asset.name,
-      mimeType: asset.mimeType ?? 'application/octet-stream',
-    });
+      await send({
+        uri: asset.uri,
+        name: asset.name,
+        mimeType: asset.mimeType ?? 'application/octet-stream',
+      });
+    } catch (err) {
+      Alert.alert('Could not open the picker', errorMessage(err));
+    }
   };
 
   const takePhoto = async () => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Camera unavailable', 'Allow camera access to photograph the document.');
-      return;
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Camera unavailable', 'Allow camera access to photograph the document.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+      const asset = result.assets?.[0];
+      if (result.canceled || !asset) return;
+
+      await send({
+        uri: asset.uri,
+        name: asset.fileName ?? `${kind.toLowerCase()}.jpg`,
+        mimeType: asset.mimeType ?? 'image/jpeg',
+      });
+    } catch (err) {
+      // Without this the picker rejects into nothing and the button looks dead.
+      Alert.alert('Camera unavailable', errorMessage(err, 'Could not open the camera.'));
     }
-
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-    const asset = result.assets?.[0];
-    if (result.canceled || !asset) return;
-
-    await send({
-      uri: asset.uri,
-      name: asset.fileName ?? `${kind.toLowerCase()}.jpg`,
-      mimeType: asset.mimeType ?? 'image/jpeg',
-    });
   };
 
   const remove = (doc: DocumentRef) => {
@@ -159,16 +170,24 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
 
       {!disabled ? (
         <View style={styles.actions}>
-          <Pressable
-            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-            onPress={takePhoto}
-            disabled={busy}
-          >
-            <Icon name="photo_camera" size={18} color={colors.primary} />
-            <Text variant="labelMd" weight="semibold" color={colors.primary}>
-              {busy ? 'Uploading…' : 'Camera'}
-            </Text>
-          </Pressable>
+          {/*
+            Hidden on web: a desktop browser has no camera roll, and
+            launchCameraAsync there either does nothing or errors. Offering a
+            button that cannot work is worse than not offering it — "Choose
+            file" already covers photographing on a phone and attaching it.
+          */}
+          {Platform.OS !== 'web' ? (
+            <Pressable
+              style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+              onPress={takePhoto}
+              disabled={busy}
+            >
+              <Icon name="photo_camera" size={18} color={colors.primary} />
+              <Text variant="labelMd" weight="semibold" color={colors.primary}>
+                {busy ? 'Uploading…' : 'Camera'}
+              </Text>
+            </Pressable>
+          ) : null}
 
           <Pressable
             style={({ pressed }) => [styles.action, pressed && styles.pressed]}

@@ -1,17 +1,18 @@
 import React from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
+  Alert,
   Badge,
   Card,
+  colors,
   Icon,
   ListRow,
+  radius,
   Screen,
   SectionHeader,
+  spacing,
   Text,
   TopBar,
-  colors,
-  radius,
-  spacing,
   useAuth,
   useProviderApplication,
 } from '@healthbuddy/shared';

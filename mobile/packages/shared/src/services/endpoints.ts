@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { api, API_BASE_URL } from './api';
 
 /* ---------- Shared shapes (mirror the backend response contracts) ---------- */
@@ -894,8 +895,17 @@ export interface UploadTarget {
 }
 
 /**
- * Uploads a file as multipart. React Native's FormData takes a
- * `{ uri, name, type }` object rather than a Blob.
+ * Uploads a file as multipart.
+ *
+ * The two platforms need genuinely different payloads, and getting this wrong
+ * fails silently rather than loudly:
+ *
+ *   native — React Native's FormData takes a `{ uri, name, type }` descriptor
+ *            and streams the file from disk itself.
+ *   web    — the browser's FormData has no such shortcut. Appending that same
+ *            object stringifies it to "[object Object]", so the server receives
+ *            a text field named `file` and reports that no file was attached.
+ *            The picked `blob:`/`data:` URI has to be fetched into a real Blob.
  */
 export const uploadDocument = async (
   file: UploadTarget,
@@ -903,18 +913,32 @@ export const uploadDocument = async (
   link?: { applicationId?: string; labOrderId?: string; appointmentId?: string }
 ) => {
   const form = new FormData();
-  form.append('file', {
-    uri: file.uri,
-    name: file.name,
-    type: file.mimeType,
-  } as unknown as Blob);
+
+  if (Platform.OS === 'web') {
+    const blob = await (await fetch(file.uri)).blob();
+    // Some pickers hand back an empty or generic type; prefer what we were told.
+    form.append('file', new File([blob], file.name, { type: file.mimeType || blob.type }));
+  } else {
+    form.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType,
+    } as unknown as Blob);
+  }
+
   form.append('kind', kind);
   if (link?.applicationId) form.append('applicationId', link.applicationId);
   if (link?.labOrderId) form.append('labOrderId', link.labOrderId);
   if (link?.appointmentId) form.append('appointmentId', link.appointmentId);
 
   const res = await api.post<{ document: DocumentRef }>('/files', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+    /**
+     * Native needs the header set explicitly. The browser must NOT have it set:
+     * multipart requires a boundary token, and only the browser knows the one
+     * it generated. Setting the bare content type here overrides that, the
+     * boundary goes missing, and the server cannot parse the body at all.
+     */
+    ...(Platform.OS === 'web' ? {} : { headers: { 'Content-Type': 'multipart/form-data' } }),
     timeout: 60000,
   });
   return res.data.document;

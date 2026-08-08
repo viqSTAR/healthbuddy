@@ -1,16 +1,17 @@
 import React from 'react';
-import { View, StyleSheet, Linking, Pressable, Alert } from 'react-native';
+import { View, StyleSheet, Linking, Pressable } from 'react-native';
 import {
+  Alert,
   Badge,
   Card,
-  Icon,
-  Loading,
-  SectionHeader,
-  Text,
   colors,
   fetchEmergencyServices,
+  Icon,
+  Loading,
   radius,
+  SectionHeader,
   spacing,
+  Text,
   useAsync,
   type EmergencyServiceEntry,
   type EmergencyServiceType,

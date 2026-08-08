@@ -1,22 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Alert, Switch } from 'react-native';
+import { View, StyleSheet, Switch } from 'react-native';
 import {
+  Alert,
   Avatar,
   Badge,
   Button,
   Card,
+  colors,
+  errorMessage,
   ErrorState,
+  fetchMyDoctorProfile,
   Input,
   ListRow,
   Loading,
   Screen,
   SectionHeader,
+  spacing,
   Text,
   TopBar,
-  colors,
-  errorMessage,
-  fetchMyDoctorProfile,
-  spacing,
   updateMyDoctorProfile,
   useAsync,
   useAuth,

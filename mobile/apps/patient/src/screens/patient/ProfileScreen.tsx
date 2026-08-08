@@ -1,20 +1,21 @@
 import React from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import {
+  Alert,
   Avatar,
   Badge,
   Card,
+  colors,
   ErrorState,
+  fetchMyAppointments,
+  fetchMyProfile,
   ListRow,
   Loading,
   Screen,
+  spacing,
   StatTile,
   Text,
   TopBar,
-  colors,
-  fetchMyAppointments,
-  fetchMyProfile,
-  spacing,
   useAsync,
   useAuth,
 } from '@healthbuddy/shared';
