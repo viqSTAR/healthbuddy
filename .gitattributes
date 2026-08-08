@@ -1,0 +1,35 @@
+# Normalise line endings.
+#
+# Text is stored LF in the repository and checked out however the platform
+# wants. Without this, committing from Windows rewrites whole files as CRLF and
+# anyone on Linux or macOS sees every line of every file as changed — which
+# buries real diffs and makes `git blame` useless.
+* text=auto eol=lf
+
+# Files that must keep LF regardless of platform: shell scripts break outright
+# with CRLF, and these are read by tooling that assumes LF.
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.prisma    text eol=lf
+.env.example text eol=lf
+
+# Batch files are the opposite case — cmd.exe needs CRLF.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Binary: never touch these, and never try to diff them as text.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.ttf       binary
+*.otf       binary
+*.woff      binary
+*.woff2     binary
+*.pdf       binary
+*.jks       binary
+*.keystore  binary
+
+# Lockfiles are generated. Collapsing them keeps pull requests readable.
+package-lock.json linguist-generated=true -diff
