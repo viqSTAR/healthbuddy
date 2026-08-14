@@ -143,10 +143,29 @@ Status: **[building]** — see §9.
 
 ## 5. Journey: medicine order → doorstep
 
+### The order is the purchase; the shipment is the parcel
+
+A basket is priced line by line from whichever shop serving the patient's
+pincode has that item cheapest and in stock. Nothing guarantees that is one
+shop, so an order is split into **one `Shipment` per sourcing pharmacy**.
+
+```mermaid
+flowchart LR
+    CART["Cart<br/>3 lines"] --> SRC{"Source each line<br/>cheapest in-stock<br/>shop serving pincode"}
+    SRC --> S1["Shipment A<br/>QuickMeds · EXPRESS<br/>1 line"]
+    SRC --> S2["Shipment B<br/>Central · STANDARD<br/>2 lines"]
+    S1 --> P1["Settlement leg A"]
+    S2 --> P2["Settlement leg B"]
+    P1 --> PLAT["Platform remainder"]
+    P2 --> PLAT
+```
+
+Each shipment moves independently:
+
 ```mermaid
 stateDiagram-v2
-    [*] --> PLACED: patient orders<br/>(direct or via consent)
-    PLACED --> ACCEPTED: pharmacy claims<br/>(atomic — one winner)
+    [*] --> PLACED: parcel created<br/>already addressed to its shop
+    PLACED --> ACCEPTED: pharmacy accepts
     ACCEPTED --> PROCESSING: packing
     PROCESSING --> DISPATCHED: rider assigned
     DISPATCHED --> DELIVERED
@@ -155,11 +174,46 @@ stateDiagram-v2
     PROCESSING --> CANCELLED
 ```
 
-Guard on `DISPATCHED`: an order containing prescription-only medicine cannot
-leave the shop without a prescription attached. Enforced server-side.
+The order's own status is **derived**: it sits at the least advanced live
+shipment, so an order is not "delivered" while half of it is still being packed.
+`deriveOrderStatus` computes it on read and `syncOrderStatusService` writes it
+back, so SQL filters and the API agree.
+
+**Why this exists.** Before shipments, each line was still reserved against a
+specific shop's shelf, but the whole order was assigned to whichever pharmacy
+supplied the most lines. Three things followed from that fiction: a partner saw
+items it had never stocked, its reservations were released against someone
+else's inventory, and at settlement **that one pharmacy was credited for every
+other shop's goods**. The split is a correctness fix that happens to also be the
+feature.
+
+### Serviceability is declared, not inferred
+
+`PharmacyServiceArea` lists the pincodes a shop commits to. Straight-line
+distance says nothing about whether a river, a state border or the shop's own
+willingness stands in the way, so the platform asks rather than guesses. A
+pincode nobody serves does not produce a filtered catalogue — the store does not
+open at all, because a listing that refuses at checkout teaches people the whole
+catalogue is unreliable.
+
+### Delivery speed is a property of the medicine
+
+`Medicine.deliverySpeed` (`EXPRESS` / `STANDARD`) is set per catalogue line by an
+admin, defaulting to `STANDARD` so nothing silently promises a speed nobody
+agreed to fulfil. A shipment takes the **slowest** speed among its lines — a box
+cannot arrive before the thing in it that takes longest.
+
+Guard on `DISPATCHED`: a shipment containing prescription-only medicine cannot
+leave the shop without a prescription attached. Checked against that shipment's
+own lines — another shop's antibiotic must not strand this parcel.
+
+**Partial cancellation.** Cancelling one parcel while others are still shipping
+refunds that parcel's subtotal and reverses only that partner's settlement leg,
+leaving the payment `PAID` because the other shops are still owed. Cancelling
+the last live parcel cancels the order and refunds the remainder.
 
 `assignedAgentUserId` carries the rider today (partner staff) and a dedicated
-rider app later.
+rider app later — see §10.
 
 ---
 
@@ -253,6 +307,10 @@ broke, and it has six regression tests guarding it.
 | Video room minting + join authorisation | `videoService.ts` |
 | Stock ledger, reservations, expiry control | `stockService.ts` |
 | Uniform lab pricing by area | `inventoryService.ts` |
+| Patient address book, GPS capture, pincode serviceability | `locationService.ts` |
+| Location-scoped catalogue at each area's real prices | `pharmacyService.ts` |
+| Multi-pharmacy orders split into per-shop shipments | `shipmentService.ts` |
+| Per-shipment settlement legs and partial refunds | `paymentService.ts` |
 
 ### Stock: a ledger, not a number
 

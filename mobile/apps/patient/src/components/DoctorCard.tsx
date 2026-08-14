@@ -8,6 +8,7 @@ import {
   Icon,
   Text,
   colors,
+  rupees,
   spacing,
   type Doctor,
 } from '@healthbuddy/shared';
@@ -61,6 +62,9 @@ export const DoctorRow: React.FC<{
 
         <Text variant="captionSm" color={colors.captionGray}>
           {doctor.specialty} · {doctor.experienceYears} yrs exp
+          {/* Only present on an in-person search, so its absence is meaningful
+              rather than missing data. */}
+          {typeof doctor.distanceKm === 'number' ? ` · ${doctor.distanceKm} km` : ''}
         </Text>
 
         <View style={styles.metaRow}>
@@ -71,7 +75,7 @@ export const DoctorRow: React.FC<{
             </Text>
           </View>
           <Text variant="captionSm" weight="semibold" color={colors.primary}>
-            ${doctor.consultationFee.toFixed(2)}
+            {rupees(doctor.consultationFee)}
           </Text>
         </View>
       </View>

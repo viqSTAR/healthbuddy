@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import {
-  acceptMedicineOrder,
+  acceptShipment,
   Alert,
   Badge,
   Button,
@@ -12,11 +12,12 @@ import {
   EmptyState,
   errorMessage,
   ErrorState,
-  fetchPharmacyQueue,
+  fetchShipmentQueue,
   Icon,
   Loading,
   markCodCollected,
   radius,
+  rupees,
   Screen,
   SectionHeader,
   spacing,
@@ -24,9 +25,9 @@ import {
   StatusPill,
   Text,
   TopBar,
-  updateMedicineOrderStatus,
+  updateShipmentStatus,
   useAsync,
-  type MedicineOrder,
+  type PharmacyShipment,
   type OrderStatus,
 } from '@healthbuddy/shared';
 
@@ -48,27 +49,31 @@ const NEXT_STATUS: Partial<Record<OrderStatus, { label: string; status: OrderSta
 
 export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [filter, setFilter] = useState<OrderStatus | undefined>(undefined);
-  const queue = useAsync(() => fetchPharmacyQueue(filter), [filter]);
+  /**
+   * Shipments, not orders. A basket can be filled by several shops, and this
+   * shop is only responsible for — and only allowed to see — its own parcel.
+   */
+  const queue = useAsync(() => fetchShipmentQueue(filter), [filter]);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const counts = useMemo(() => {
-    const orders = queue.data ?? [];
+    const shipments = queue.data ?? [];
     return {
-      open: orders.filter((o) => o.status === 'PLACED').length,
-      active: orders.filter((o) => ['ACCEPTED', 'PROCESSING', 'DISPATCHED'].includes(o.status))
+      open: shipments.filter((s) => s.status === 'PLACED').length,
+      active: shipments.filter((s) => ['ACCEPTED', 'PROCESSING', 'DISPATCHED'].includes(s.status))
         .length,
-      delivered: orders.filter((o) => o.status === 'DELIVERED').length,
+      delivered: shipments.filter((s) => s.status === 'DELIVERED').length,
     };
   }, [queue.data]);
 
-  const accept = async (order: MedicineOrder) => {
-    setBusyId(order.id);
+  const accept = async (shipment: PharmacyShipment) => {
+    setBusyId(shipment.id);
     try {
-      await acceptMedicineOrder(order.id);
+      await acceptShipment(shipment.id);
       queue.reload();
     } catch (err) {
-      // A 409 here means another pharmacy won the race — refresh so the queue
-      // stops showing an order this shop can no longer act on.
+      // A 409 means it already moved on — refresh so the queue stops offering
+      // an action this shop can no longer take.
       Alert.alert('Could not accept', errorMessage(err));
       queue.reload();
     } finally {
@@ -76,15 +81,20 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     }
   };
 
-  const advance = async (order: MedicineOrder, status: OrderStatus) => {
-    setBusyId(order.id);
+  const advance = async (shipment: PharmacyShipment, status: OrderStatus) => {
+    setBusyId(shipment.id);
     try {
-      await updateMedicineOrderStatus(order.id, status);
-      // Marking a cash order delivered is also the moment the money arrived,
-      // so settle it in the same step rather than leaving a debt open that
-      // someone has to remember to clear.
-      if (status === 'DELIVERED' && order.payment?.method === 'COD') {
-        await markCodCollected(order.id).catch(() => undefined);
+      await updateShipmentStatus(shipment.id, status);
+      // Marking a cash order delivered is also the moment the money arrived, so
+      // settle it in the same step rather than leaving a debt open that someone
+      // has to remember to clear. Only on the last parcel — the rider collects
+      // the whole order's cash once, not once per box.
+      if (
+        status === 'DELIVERED' &&
+        shipment.order.payment?.method === 'COD' &&
+        shipment.order.shipmentCount === 1
+      ) {
+        await markCodCollected(shipment.order.id).catch(() => undefined);
       }
       queue.reload();
     } catch (err) {
@@ -97,7 +107,7 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   if (queue.loading) return <Loading label="Loading orders" />;
   if (queue.error) return <ErrorState message={queue.error} onRetry={queue.reload} />;
 
-  const orders = queue.data ?? [];
+  const shipments = queue.data ?? [];
 
   return (
     <Screen scroll refreshing={queue.refreshing} onRefresh={queue.refresh}>
@@ -120,48 +130,62 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         ))}
       </ChipRow>
 
-      <SectionHeader title={`Orders (${orders.length})`} />
+      <SectionHeader title={`To fulfil (${shipments.length})`} />
 
-      {orders.length === 0 ? (
+      {shipments.length === 0 ? (
         <EmptyState
           icon="inbox"
-          title="No orders here"
-          message="New patient orders will appear as soon as they are placed."
+          title="Nothing to fulfil"
+          message="Parcels routed to this pharmacy will appear here as soon as they are placed."
         />
       ) : (
         <View style={styles.list}>
-          {orders.map((order) => {
-            const next = NEXT_STATUS[order.status];
-            const unclaimed = order.status === 'PLACED' && !order.pharmacyId;
+          {shipments.map((shipment) => {
+            const next = NEXT_STATUS[shipment.status];
+            const unclaimed = shipment.status === 'PLACED';
+            const { order } = shipment;
+            // Say so when this is part of a larger order, otherwise the item
+            // count looks wrong against what the patient says they bought.
+            const partOfMore = order.shipmentCount > 1;
 
             return (
-              <Card key={order.id} style={styles.order}>
+              <Card key={shipment.id} style={styles.order}>
                 <View style={styles.orderHeader}>
                   <View style={styles.flex}>
                     <Text variant="labelMd" weight="bold" color={colors.onSurface}>
                       {order.patient?.fullName ?? 'Patient'}
                     </Text>
                     <Text variant="captionSm" color={colors.captionGray}>
-                      #{order.id.slice(0, 8)} · {order.items.length} item(s)
+                      #{order.id.slice(0, 8)} · {shipment.items.length} item(s)
+                      {partOfMore ? ` · your part of ${order.shipmentCount}` : ''}
                     </Text>
                   </View>
-                  <StatusPill status={order.status} />
+                  <StatusPill status={shipment.status} />
                 </View>
 
+                {shipment.speed === 'EXPRESS' ? (
+                  <View style={styles.address}>
+                    <Icon name="bolt" size={14} color={colors.successDark} />
+                    <Text variant="captionSm" weight="semibold" color={colors.successDark}>
+                      Express · promised under 30 minutes
+                    </Text>
+                  </View>
+                ) : null}
+
                 <View style={styles.items}>
-                  {order.items.slice(0, 3).map((item) => (
+                  {shipment.items.slice(0, 3).map((item) => (
                     <View key={item.medicineId} style={styles.item}>
                       <Text variant="captionSm" color={colors.onSurfaceVariant} style={styles.flex}>
                         {item.quantity} × {item.name}
                       </Text>
                       <Text variant="captionSm" weight="semibold" color={colors.onSurface}>
-                        ₹{item.itemTotal}
+                        {rupees(item.itemTotal)}
                       </Text>
                     </View>
                   ))}
-                  {order.items.length > 3 ? (
+                  {shipment.items.length > 3 ? (
                     <Text variant="captionSm" color={colors.captionGray}>
-                      +{order.items.length - 3} more
+                      +{shipment.items.length - 3} more
                     </Text>
                   ) : null}
                 </View>
@@ -175,7 +199,9 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
                 {/*
                   Cash orders need collecting at the door, so the rider has to
-                  see that before setting off — not after.
+                  see that before setting off — not after. The amount is the
+                  whole order's, and on a split order only one rider collects
+                  it, so it is labelled rather than shown as this parcel's due.
                 */}
                 {order.payment ? (
                   <View style={styles.address}>
@@ -197,30 +223,34 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                       {order.payment.method === 'COD'
                         ? order.payment.status === 'PAID'
                           ? 'Cash collected'
-                          : `Collect ₹${order.payment.amount.toFixed(0)} on delivery`
-                        : `Paid online · ₹${order.payment.amount.toFixed(0)}`}
+                          : partOfMore
+                            ? `Order total ${rupees(order.payment.amount)} — cash collected once, across all parcels`
+                            : `Collect ${rupees(order.payment.amount)} on delivery`
+                        : `Paid online · ${rupees(order.payment.amount)}`}
                     </Text>
                   </View>
                 ) : null}
 
                 <View style={styles.footer}>
+                  {/* This parcel's subtotal — what this shop is owed for, not
+                      the order total, which includes another shop's goods. */}
                   <Text variant="headlineSm" weight="bold" color={colors.primary}>
-                    ₹{order.totalAmount}
+                    {rupees(shipment.subtotal)}
                   </Text>
 
                   {unclaimed ? (
                     <Button
-                      label="Accept order"
+                      label="Accept"
                       size="sm"
-                      onPress={() => void accept(order)}
-                      loading={busyId === order.id}
+                      onPress={() => void accept(shipment)}
+                      loading={busyId === shipment.id}
                     />
                   ) : next ? (
                     <Button
                       label={next.label}
                       size="sm"
-                      onPress={() => void advance(order, next.status)}
-                      loading={busyId === order.id}
+                      onPress={() => void advance(shipment, next.status)}
+                      loading={busyId === shipment.id}
                     />
                   ) : (
                     <Badge label="Closed" tint="neutral" />

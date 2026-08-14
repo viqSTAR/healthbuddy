@@ -15,6 +15,7 @@ import {
   fetchMyLabOrders,
   fetchMyMedicineOrders,
   radius,
+  rupees,
   spacing,
   useAsync,
 } from '@healthbuddy/shared';
@@ -91,12 +92,36 @@ export const MyOrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                   {order.items.map((i) => i.name).join(', ')}
                 </Text>
 
+                {/* One row per parcel when there is more than one. An order in
+                    two halves whose statuses differ is exactly the case a
+                    single order-level pill cannot describe honestly. */}
+                {(order.shipments?.length ?? 0) > 1 ? (
+                  <View style={styles.parcels}>
+                    {order.shipments?.map((shipment, index) => (
+                      <View key={shipment.id} style={styles.parcelRow}>
+                        <Icon
+                          name={shipment.speed === 'EXPRESS' ? 'bolt' : 'local_shipping'}
+                          size={14}
+                          color={
+                            shipment.speed === 'EXPRESS' ? colors.successDark : colors.captionGray
+                          }
+                        />
+                        <Text variant="captionSm" color={colors.captionGray} style={styles.flex}>
+                          Parcel {index + 1} of {order.shipments?.length} ·{' '}
+                          {shipment.pharmacy.name}
+                        </Text>
+                        <StatusPill status={shipment.status} />
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
                 <View style={styles.cardFoot}>
                   <Text variant="captionSm" color={colors.captionGray} numberOfLines={1}>
                     {order.address}
                   </Text>
                   <Text variant="bodyMd" weight="semibold" color={colors.primary}>
-                    ${order.totalAmount.toFixed(2)}
+                    {rupees(order.totalAmount)}
                   </Text>
                 </View>
               </Card>
@@ -137,7 +162,7 @@ export const MyOrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                   {order.reportUrl ? 'Report available' : 'Report pending'}
                 </Text>
                 <Text variant="bodyMd" weight="semibold" color={colors.primary}>
-                  ${order.price.toFixed(2)}
+                  {rupees(order.price)}
                 </Text>
               </View>
             </Card>
@@ -170,5 +195,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   flex: { flex: 1 },
+  parcels: {
+    gap: spacing.base,
+    paddingTop: spacing.base,
+    marginTop: spacing.stackMedium,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceContainerHigh,
+  },
+  parcelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.base },
   cardFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.insetCard },
 });

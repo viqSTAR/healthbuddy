@@ -5,8 +5,20 @@ import {
   updatePatientProfileHandler,
   getMedicalRecordHandler,
 } from '../controllers/patientController.js';
+import {
+  listAddressesHandler,
+  createAddressHandler,
+  updateAddressHandler,
+  deleteAddressHandler,
+  setDefaultAddressHandler,
+} from '../controllers/locationController.js';
 import { authenticateJwt, authorizeRoles } from '../middlewares/auth.js';
-import { validate, latitudeSchema, longitudeSchema } from '../middlewares/validate.js';
+import {
+  validate,
+  latitudeSchema,
+  longitudeSchema,
+  uuidSchema,
+} from '../middlewares/validate.js';
 
 const router = Router();
 
@@ -46,5 +58,58 @@ router.put(
 );
 
 router.get('/me/records', getMedicalRecordHandler);
+
+/* ---------- The address book ---------- */
+
+/**
+ * Pincode is required while the rest of the address is not, because it is the
+ * only field the platform makes decisions from. A patient can be vague about
+ * their landmark; they cannot be vague about whether we deliver there.
+ */
+const pincodeSchema = z
+  .string()
+  .trim()
+  .regex(/^[1-9][0-9]{5}$/, 'Enter a valid 6-digit pincode.');
+
+const addressBody = z.object({
+  label: z.enum(['HOME', 'WORK', 'OTHER']).optional(),
+  line1: z.string().trim().min(3, 'Enter the house and street.').max(200),
+  line2: z.string().trim().max(200).nullable().optional(),
+  city: z.string().trim().max(80).nullable().optional(),
+  state: z.string().trim().max(80).nullable().optional(),
+  pincode: pincodeSchema,
+  landmark: z.string().trim().max(120).nullable().optional(),
+  latitude: latitudeSchema.nullable().optional(),
+  longitude: longitudeSchema.nullable().optional(),
+  isDefault: z.boolean().optional(),
+});
+
+router.get('/me/addresses', listAddressesHandler);
+
+router.post('/me/addresses', validate({ body: addressBody.strict() }), createAddressHandler);
+
+router.patch(
+  '/me/addresses/:id',
+  validate({
+    params: z.object({ id: uuidSchema }),
+    body: addressBody
+      .partial()
+      .strict()
+      .refine((b) => Object.keys(b).length > 0, { message: 'Send at least one field to change.' }),
+  }),
+  updateAddressHandler
+);
+
+router.delete(
+  '/me/addresses/:id',
+  validate({ params: z.object({ id: uuidSchema }) }),
+  deleteAddressHandler
+);
+
+router.post(
+  '/me/addresses/:id/default',
+  validate({ params: z.object({ id: uuidSchema }) }),
+  setDefaultAddressHandler
+);
 
 export default router;

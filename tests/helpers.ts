@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../src/app.js';
 import { prisma } from '../src/config/db.js';
+import { platformNow } from '../src/utils/clock.js';
 
 export { app, prisma, request };
 
@@ -86,6 +87,36 @@ export const loginAs = async (role: 'DOCTOR' | 'PHARMACY' | 'LAB_PARTNER' | 'ADM
 
 export const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
+const sessions = new Map<string, Promise<Session>>();
+
+/**
+ * Signs in as a fixed, seeded account — reusing the session if this run already
+ * has one.
+ *
+ * OTP requests are rate limited to one per minute per number, which is correct
+ * behaviour and must not be relaxed for tests. But several tests legitimately
+ * need to act as the same seeded pharmacy or doctor, and back-to-back logins
+ * inside that window fail with a 429 that has nothing to do with what is being
+ * tested. Caching the promise (not the result) also means two tests starting
+ * together share one login rather than racing into the same limit.
+ *
+ * Only for accounts that exist before the run. Use `login()` for throwaway
+ * patients — those want a fresh number each time.
+ */
+export const loginOnce = (phone: string): Promise<Session> => {
+  const existing = sessions.get(phone);
+  if (existing) return existing;
+
+  const pending = login(phone).catch((err: unknown) => {
+    // Don't cache a failure: the next caller should get a real attempt.
+    sessions.delete(phone);
+    throw err;
+  });
+
+  sessions.set(phone, pending);
+  return pending;
+};
+
 /** Removes every user created by this run, cascading to their profiles. */
 export const cleanupTestUsers = async () => {
   const users = await prisma.user.findMany({
@@ -133,12 +164,26 @@ export const anOrderableMedicine = async () => {
   return medicine;
 };
 
-/** Grabs a seeded doctor plus one free slot. */
+/**
+ * Grabs a seeded doctor plus one slot a patient could actually book.
+ *
+ * "Available" is not enough: a slot whose start has gone by is still AVAILABLE
+ * in the table, and booking one is refused. Seeded days accumulate past slots as
+ * the day wears on, so a test picking the first AVAILABLE row starts failing at
+ * whatever hour the earliest seeded slot lapses.
+ */
 export const anAvailableSlot = async () => {
+  const now = platformNow();
+
   const slot = await prisma.doctorSlot.findFirst({
-    where: { status: 'AVAILABLE' },
+    where: {
+      status: 'AVAILABLE',
+      OR: [{ date: { gt: now.date } }, { date: now.date, startTime: { gt: now.time } }],
+    },
+    orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     include: { doctor: true },
   });
-  if (!slot) throw new Error('No available slot — run `npm run seed`.');
+
+  if (!slot) throw new Error('No future slot available — run `npm run seed`.');
   return slot;
 };

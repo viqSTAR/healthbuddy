@@ -24,6 +24,11 @@ export interface Doctor {
   councilRegistrationNumber?: string | null;
   councilName?: string | null;
   verifiedAt?: string | null;
+  /** Where the clinic is. Only meaningful for an in-person visit. */
+  clinicCity?: string | null;
+  clinicPincode?: string | null;
+  /** Present only on an IN_PERSON list, and null for an unmapped clinic. */
+  distanceKm?: number | null;
   user?: { id: string; phoneNumber: string };
 }
 
@@ -66,17 +71,30 @@ export interface Appointment {
   documents?: DocumentRef[];
 }
 
+/** How quickly a medicine can reach a patient. Set per catalogue line. */
+export type DeliverySpeed = 'EXPRESS' | 'STANDARD';
+
 export interface Medicine {
   id: string;
   name: string;
   category: string;
+  /**
+   * With a pincode this is the cheapest local shop's price; without one it is
+   * the reference MRP. `mrp` is only sent in the first case, which is how a
+   * screen can tell a real discount from a missing one.
+   */
   price: number;
+  mrp?: number;
   stock: number;
+  /** Sellable right now at `soldBy`. Only present on a pincode-scoped list. */
+  available?: number;
+  soldBy?: { id: string; name: string } | null;
   description: string | null;
   composition?: string | null;
   schedule: DrugSchedule;
   teleList: TeleDrugList;
   requiresPrescription: boolean;
+  deliverySpeed: DeliverySpeed;
 }
 
 /** A catalogue entry annotated for one appointment's telemedicine context. */
@@ -187,6 +205,31 @@ export interface OrderItem {
   price: number;
   quantity: number;
   itemTotal: number;
+  /** Which shop is filling this line. Absent on orders placed before shipments. */
+  pharmacyId?: string;
+  speed?: DeliverySpeed;
+}
+
+/**
+ * The part of an order one pharmacy is filling.
+ *
+ * A basket sourced from three shops arrives as three parcels, each with its own
+ * status and its own courier. The order is what was bought; the shipment is
+ * what actually turns up at the door.
+ */
+export interface Shipment {
+  id: string;
+  pharmacyId: string;
+  items: OrderItem[];
+  subtotal: number;
+  speed: DeliverySpeed;
+  status: OrderStatus;
+  acceptedAt: string | null;
+  dispatchedAt: string | null;
+  deliveredAt: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+  pharmacy: { id: string; name: string; city: string | null };
 }
 
 export type OrderStatus =
@@ -215,6 +258,15 @@ export interface MedicineOrder {
   deliveredAt: string | null;
   cancelReason: string | null;
   createdAt: string;
+  /** Where it went, and the area it was sourced from. */
+  pincode?: string | null;
+  addressId?: string | null;
+  /**
+   * `status` on the order is derived from these — an order is only as far along
+   * as its least advanced parcel.
+   */
+  shipments?: Shipment[];
+  shipmentCount?: number;
   patient?: { id: string; fullName: string; emergencyContact?: string | null };
   assignedAgent?: { id: string; phoneNumber: string } | null;
   /**
@@ -435,8 +487,16 @@ export interface AdminStats {
 
 /* ---------- Doctors: public catalogue ---------- */
 
-export const fetchDoctors = async (params?: { specialty?: string; query?: string }) =>
-  (await api.get<{ doctors: Doctor[]; total: number }>('/doctors', { params })).data;
+export const fetchDoctors = async (params?: {
+  specialty?: string;
+  query?: string;
+  /**
+   * IN_PERSON narrows to clinics near `pincode` and sorts by distance. VIDEO
+   * lists everyone — a video consultation is not limited by geography.
+   */
+  visitType?: 'VIDEO' | 'IN_PERSON';
+  pincode?: string;
+}) => (await api.get<{ doctors: Doctor[]; total: number }>('/doctors', { params })).data;
 
 export const fetchDoctor = async (id: string) =>
   (await api.get<{ doctor: Doctor }>(`/doctors/${id}`)).data.doctor;
@@ -493,12 +553,23 @@ export const fetchDoctorQueue = async () =>
 
 /* ---------- Pharmacy: catalogue & patient orders ---------- */
 
-export const fetchMedicines = async (params?: { category?: string; query?: string }) =>
-  (await api.get<{ medicines: Medicine[]; total: number }>('/pharmacy/medicines', { params })).data;
+export const fetchMedicines = async (params?: {
+  category?: string;
+  query?: string;
+  /** Narrows the catalogue to shops that deliver here, at their real prices. */
+  pincode?: string;
+}) =>
+  (await api.get<{ medicines: Medicine[]; total: number; pincode?: string }>(
+    '/pharmacy/medicines',
+    { params }
+  )).data;
 
 export const placeMedicineOrder = async (payload: {
   items: { medicineId: string; quantity: number }[];
-  address: string;
+  /** Prefer a saved address: it is the only form that carries a known pincode. */
+  addressId?: string;
+  address?: string;
+  pincode?: string;
 }) => (await api.post<{ order: MedicineOrder }>('/pharmacy/orders', payload)).data.order;
 
 export const fetchMyMedicineOrders = async () =>
@@ -507,11 +578,123 @@ export const fetchMyMedicineOrders = async () =>
 export const fetchMedicineOrder = async (id: string) =>
   (await api.get<{ order: MedicineOrder }>(`/pharmacy/my-orders/${id}`)).data.order;
 
+/* ---------- Where the patient is ---------- */
+
+export type AddressLabel = 'HOME' | 'WORK' | 'OTHER';
+
+export interface Address {
+  id: string;
+  label: AddressLabel;
+  line1: string;
+  line2: string | null;
+  city: string | null;
+  state: string | null;
+  /** The field the platform actually decides from. Always present. */
+  pincode: string;
+  landmark: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export interface AddressDraft {
+  label?: AddressLabel;
+  line1: string;
+  line2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode: string;
+  landmark?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  isDefault?: boolean;
+}
+
+export interface Serviceability {
+  pincode: string;
+  /** False means the store does not open here at all. */
+  serviceable: boolean;
+  pharmacyCount: number;
+  city: string | null;
+  state: string | null;
+  expressAvailable: boolean;
+}
+
+export const fetchAddresses = async () =>
+  (await api.get<{ addresses: Address[] }>('/patients/me/addresses')).data.addresses;
+
+export const createAddress = async (draft: AddressDraft) =>
+  (await api.post<{ address: Address }>('/patients/me/addresses', draft)).data.address;
+
+export const updateAddress = async (id: string, draft: Partial<AddressDraft>) =>
+  (await api.patch<{ address: Address }>(`/patients/me/addresses/${id}`, draft)).data.address;
+
+export const deleteAddress = async (id: string) => {
+  await api.delete(`/patients/me/addresses/${id}`);
+};
+
+export const setDefaultAddress = async (id: string) =>
+  (await api.post<{ address: Address }>(`/patients/me/addresses/${id}/default`, {})).data.address;
+
+/** Asked before the store is drawn, so nobody browses a shop that cannot serve them. */
+export const checkServiceability = async (pincode: string) =>
+  (await api.get<Serviceability>('/pharmacy/serviceability', { params: { pincode } })).data;
+
 /* ---------- Pharmacy: partner side ---------- */
 
 export const fetchPharmacyQueue = async (status?: OrderStatus) =>
   (await api.get<{ orders: MedicineOrder[] }>('/pharmacy/pharmacy-queue', { params: { status } }))
     .data.orders;
+
+/**
+ * A shipment as its pharmacy sees it — with just enough of the order attached
+ * to pack and deliver it, and nothing about the lines other shops are filling.
+ */
+export interface PharmacyShipment extends Shipment {
+  assignedAgentUserId: string | null;
+  assignedAgent?: { id: string; phoneNumber: string } | null;
+  order: {
+    id: string;
+    address: string;
+    pincode: string | null;
+    createdAt: string;
+    prescriptionId: string | null;
+    patient: { id: string; fullName: string; emergencyContact?: string | null } | null;
+    payment: { method: PaymentMethod; status: PaymentStatus; amount: number } | null;
+    /** So a shop knows it is one of several and does not chase the rest. */
+    shipmentCount: number;
+  };
+}
+
+/**
+ * The queue a pharmacy actually works from.
+ *
+ * Prefer this over `fetchPharmacyQueue`: an order can span several shops, and
+ * this returns only the parcel this one is responsible for.
+ */
+export const fetchShipmentQueue = async (status?: OrderStatus) =>
+  (await api.get<{ shipments: PharmacyShipment[] }>('/pharmacy/shipments', { params: { status } }))
+    .data.shipments;
+
+export const acceptShipment = async (id: string) =>
+  (await api.post<{ shipment: Shipment }>(`/pharmacy/shipments/${id}/accept`)).data.shipment;
+
+export const updateShipmentStatus = async (
+  id: string,
+  status: OrderStatus,
+  cancelReason?: string
+) =>
+  (
+    await api.patch<{ shipment: Shipment }>(`/pharmacy/shipments/${id}/status`, {
+      status,
+      cancelReason,
+    })
+  ).data.shipment;
+
+export const assignShipmentAgent = async (id: string, agentUserId: string | null) =>
+  (await api.patch<{ shipment: Shipment }>(`/pharmacy/shipments/${id}/agent`, { agentUserId })).data
+    .shipment;
 
 export const acceptMedicineOrder = async (id: string) =>
   (await api.post<{ order: MedicineOrder }>(`/pharmacy/orders/${id}/accept`)).data.order;

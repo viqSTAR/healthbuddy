@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
+import { slotHasPassed } from '../utils/clock.js';
 
 const doctorCard = {
   id: true,
@@ -13,12 +14,48 @@ const doctorCard = {
   isAvailable: true,
 } satisfies Prisma.DoctorSelect;
 
+/** Great-circle distance in km. Good enough to sort a city's clinics by. */
+const distanceKm = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
+/**
+ * The doctor catalogue.
+ *
+ * `visitType` is the important argument. A video consultation reaches anywhere
+ * in the country, so filtering the list by the patient's pincode would hide
+ * doctors who could see them perfectly well — location is only a constraint
+ * when the patient has to physically travel. So IN_PERSON narrows to the
+ * patient's city and sorts by distance; VIDEO, and no preference at all, do not
+ * narrow anything.
+ */
 export const getDoctorsService = async (
   specialty?: string,
   searchQuery?: string,
   page = 1,
-  limit = 20
+  limit = 20,
+  visitType?: 'VIDEO' | 'IN_PERSON',
+  pincode?: string
 ) => {
+  const nearby = visitType === 'IN_PERSON' && pincode;
+
+  // Anchor the search on somewhere we know the coordinates of. A pharmacy
+  // serving the pincode is the most reliable anchor available without a
+  // pincode-to-coordinates table of our own.
+  const anchor = nearby
+    ? await prisma.pharmacy.findFirst({
+        where: { serviceAreas: { some: { pincode } }, latitude: { not: null } },
+        select: { city: true, latitude: true, longitude: true },
+      })
+    : null;
+
   const where: Prisma.DoctorWhereInput = {
     ...(specialty ? { specialty: { equals: specialty, mode: 'insensitive' } } : {}),
     ...(searchQuery
@@ -29,12 +66,20 @@ export const getDoctorsService = async (
           ],
         }
       : {}),
+    ...(nearby
+      ? {
+          OR: [
+            { clinicPincode: pincode },
+            ...(anchor?.city ? [{ clinicCity: { equals: anchor.city, mode: 'insensitive' as const } }] : []),
+          ],
+        }
+      : {}),
   };
 
   const [doctors, total] = await Promise.all([
     prisma.doctor.findMany({
       where,
-      select: doctorCard,
+      select: { ...doctorCard, clinicCity: true, clinicPincode: true, latitude: true, longitude: true },
       orderBy: [{ rating: 'desc' }, { experienceYears: 'desc' }],
       skip: (page - 1) * limit,
       take: limit,
@@ -42,7 +87,25 @@ export const getDoctorsService = async (
     prisma.doctor.count({ where }),
   ]);
 
-  return { doctors, total, page, limit };
+  if (!nearby || !anchor?.latitude || !anchor.longitude) {
+    return { doctors, total, page, limit, ...(visitType ? { visitType } : {}) };
+  }
+
+  const withDistance = doctors
+    .map((doctor) => ({
+      ...doctor,
+      distanceKm:
+        doctor.latitude != null && doctor.longitude != null
+          ? Number(
+              distanceKm(anchor.latitude!, anchor.longitude!, doctor.latitude, doctor.longitude).toFixed(1)
+            )
+          : null,
+    }))
+    // Nearest first, and clinics with no coordinates last rather than dropped —
+    // an unmapped clinic in the right city is still a clinic the patient can reach.
+    .sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+
+  return { doctors: withDistance, total, page, limit, visitType };
 };
 
 export const getDoctorByIdService = async (id: string) => {
@@ -51,15 +114,25 @@ export const getDoctorByIdService = async (id: string) => {
   return doctor;
 };
 
+/**
+ * The slots a patient may still book on a given day.
+ *
+ * Today's earlier slots are dropped: offering a 09:00 appointment at 17:00 is
+ * not a stale cache, it is an appointment nobody can attend. The booking call
+ * refuses them too — this filter is so the patient never sees the option, that
+ * check is so it cannot be taken anyway.
+ */
 export const getDoctorSlotsService = async (doctorId: string, date: string) => {
   const doctor = await prisma.doctor.findUnique({ where: { id: doctorId }, select: { id: true } });
   if (!doctor) throw notFound('Doctor');
 
-  return prisma.doctorSlot.findMany({
+  const slots = await prisma.doctorSlot.findMany({
     where: { doctorId, date },
     select: { id: true, doctorId: true, date: true, startTime: true, endTime: true, status: true },
     orderBy: { startTime: 'asc' },
   });
+
+  return slots.filter((slot) => !slotHasPassed(slot.date, slot.startTime));
 };
 
 /* ---------- Doctor-facing profile & availability ---------- */

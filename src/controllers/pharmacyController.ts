@@ -9,7 +9,7 @@ import {
   acceptOrderService,
   assignOrderAgentService,
   updateOrderStatusService,
-  type OrderItemInput,
+  type PlaceOrderInput,
 } from '../services/pharmacyService.js';
 import {
   asyncHandler,
@@ -19,19 +19,22 @@ import {
 } from '../middlewares/auth.js';
 
 export const getMedicinesHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { category, query, page, limit } = req.query as unknown as {
+  const { category, query, page, limit, pincode } = req.query as unknown as {
     category?: string;
     query?: string;
     page: number;
     limit: number;
+    pincode?: string;
   };
-  const result = await getMedicinesService(category, query, page, limit);
+  const result = await getMedicinesService(category, query, page, limit, pincode);
   res.status(200).json({ success: true, count: result.medicines.length, ...result });
 });
 
 export const placeOrderHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { items, address } = req.body as { items: OrderItemInput[]; address: string };
-  const order = await placeMedicineOrderService(requirePatientId(req), items, address);
+  const order = await placeMedicineOrderService(
+    requirePatientId(req),
+    req.body as PlaceOrderInput
+  );
   res.status(201).json({ success: true, message: 'Order placed.', order });
 });
 

@@ -203,13 +203,55 @@ camera, location and push — web cannot do those.
 > On Windows the dev servers bind to `localhost`, not `127.0.0.1`. If a health
 > check fails, use `http://localhost:...`.
 
+### On an Android emulator
+
+You need the Android SDK (Android Studio, or the command-line tools) and one
+virtual device. Check what you already have:
+
+```bash
+"$LOCALAPPDATA/Android/Sdk/emulator/emulator.exe" -list-avds
+```
+
+Nothing listed? Create a device in Android Studio → *Device Manager*. Any recent
+Pixel image works.
+
+Then, in three terminals:
+
+```bash
+npm run dev                                          # 1 — backend
+
+"$LOCALAPPDATA/Android/Sdk/emulator/emulator.exe" -avd <YOUR_AVD>   # 2 — emulator
+
+cd mobile/apps/patient && npm run android            # 3 — the app
+```
+
+Start the emulator **before** the app. `npm run android` looks for a running
+device, installs Expo Go into it if it isn't there, and opens the project — the
+first run downloads Expo Go, so give it a minute.
+
+Once it's up, in the Expo terminal: `r` reloads, `j` opens the debugger, `m`
+toggles the dev menu. Shake gestures are `Ctrl+M` on the emulator.
+
 ### Getting the API URL right
 
 | Where you run the app | What it needs |
 | --- | --- |
 | Web / iOS simulator | works as-is (`localhost:5000`) |
-| Android emulator | works as-is (`10.0.2.2` is handled) |
+| Android emulator | works as-is (`10.0.2.2` is detected and used) |
 | **Physical device** | your machine's LAN IP |
+
+> **Why the emulator is a special case.** Expo serves the bundle from your LAN
+> address, and the app normally reuses that host for the API — which is right
+> for a physical phone. An emulator, though, sits behind its own NAT: traffic
+> aimed at your LAN address leaves that NAT and arrives back at Windows as
+> *external* traffic, which the firewall drops. So the app detects an emulator
+> and uses `10.0.2.2` (the emulator's alias for your machine) regardless of the
+> bundle host. If you see "cannot reach the server at `http://192.168.x.x:5000`"
+> on an emulator, that detection failed — force it:
+>
+> ```bash
+> EXPO_PUBLIC_API_URL=http://10.0.2.2:5000/api/v1 npm run android
+> ```
 
 For a physical device the app already tries the Expo host automatically. If it
 can't reach the API, set it explicitly:
@@ -219,7 +261,9 @@ EXPO_PUBLIC_API_URL=http://192.168.1.20:5000/api/v1 npm run patient
 ```
 
 Your machine and phone must be on the same Wi-Fi, and your firewall must allow
-port 5000.
+port 5000. On Windows that means allowing `node.exe` on private networks — the
+prompt appears the first time, and if you dismissed it once, no later request
+gets through until you add the rule by hand.
 
 ---
 
@@ -237,6 +281,22 @@ on the OTP screen itself — you don't need SMS.
 | Patient | **any unused number**, e.g. `+15550001234` | Patient app |
 
 Any number that isn't already provisioned becomes a `PATIENT` automatically.
+
+### The three seeded pharmacies
+
+Which shop serves which pincode is what makes the store open or stay shut, and
+the overlap on `400058` is what makes an order split into two parcels.
+
+| Pharmacy | Login | Delivers to | Stocks |
+| --- | --- | --- | --- |
+| Health Buddy Central | `+15552000001` | 400058, 400053, 400061, 400076 | everything |
+| CarePlus Chemists | `+15552000002` | 110009, 110007, 110033 | everything |
+| QuickMeds Andheri | `+15552000003` | 400058, 400053 | fast-moving OTC only, cheapest |
+
+Doctors are spread across cities to match their council registrations, so an
+**in-person** search from `400058` finds Mumbai clinics only — while a **video**
+search still lists all six. Dr Priya Sharma's clinic is in Delhi, so she appears
+for video from anywhere but not for an in-person visit in Mumbai.
 
 ---
 
@@ -296,6 +356,56 @@ flagged as a follow-up and List B becomes available.
 
 Per-partner pricing: sign in as `+15552000002` (the second pharmacy) and set a
 different price for the same medicine. Both are valid simultaneously.
+
+### C1. Where you are decides what you see
+
+The patient app asks for a delivery address before it will sell anything, and
+the pincode on that address drives the catalogue, the prices and the arrival
+times.
+
+1. **Patient app** → the location chip under the brand bar → **Add an address**.
+2. Try **Use my current location** — on an emulator this returns whatever
+   position the AVD is set to, so also try typing a pincode.
+3. Enter `560001` (Bengaluru). As soon as the sixth digit lands the field turns
+   red: *"We don't deliver here yet."* Save it anyway — it is still a valid
+   address for consultations.
+4. Now enter `400058` (Mumbai) → *"Delivering in Mumbai · express available"*.
+5. Open the store on the Bengaluru address → the store does not open at all.
+   Switch to Mumbai → the catalogue appears.
+
+What to confirm: **the prices are not the catalogue MRP.** Cetirizine lists at
+₹28.00 struck against ₹32.00, because QuickMeds Andheri undercuts the reference
+price. That is the price you will actually be charged.
+
+### C1b. One order, several parcels
+
+The seed puts two Mumbai pharmacies on `400058` and gives them different
+shelves, so a mixed basket has to be filled by both.
+
+1. Store at `400058` → add **Cetirizine 10mg** (⚡ under 30 min) and
+   **Amoxicillin 250mg** (🚚 2 days).
+2. The bar above the tab bar reads **2 items · ₹140.00 · 2 parcels**.
+3. Open the cart → an amber note: *"This order will arrive in 2 separate
+   parcels, from 2 pharmacies."*
+4. **Place Order** → tracking shows **Parcel 1 of 2** (QuickMeds, Express) and
+   **Parcel 2 of 2** (Central, Standard), each with its own timeline.
+5. **Partner app** as `+15552000003` (QuickMeds) → it sees *only* the Cetirizine
+   parcel. Sign in as `+15552000001` → only the Amoxicillin one.
+6. Advance one parcel to dispatched. The other stays where it is, and the
+   order's own status stays at the slower of the two.
+
+> **Why this matters beyond the UI.** Each line was already reserved against a
+> specific shop's shelf, but the whole order used to be assigned to whichever
+> pharmacy supplied the most lines — so a partner saw items it had never
+> stocked, and at settlement that one pharmacy was credited for the other's
+> goods. Check it in the admin panel: *Payments* → the order now has **one
+> settlement leg per pharmacy**, and they still sum to exactly what was charged.
+
+Two things to try that should fail:
+
+- Order to the `560001` address → **400**, *"We don't deliver to 560001 yet."*
+- In the store, try to add more of something than the local shop has — the
+  stepper stops at the shop's sellable count, not the catalogue's.
 
 ### C2. The stock ledger
 

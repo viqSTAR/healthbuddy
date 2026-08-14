@@ -12,6 +12,7 @@ import {
   colors,
   fetchMedicineOrder,
   radius,
+  rupees,
   spacing,
   useAsync,
   type MedicineOrder,
@@ -54,7 +55,31 @@ export const OrderTrackingScreen: React.FC<{ navigation: any; route: any }> = ({
   }
 
   const cancelled = order.status === 'CANCELLED';
-  const currentIndex = STAGES.findIndex((s) => s.status === order.status);
+
+  /**
+   * Orders placed before shipments existed have none, so the order stands in as
+   * a single parcel. Without this those rows would render an empty screen.
+   */
+  const parcels =
+    order.shipments && order.shipments.length > 0
+      ? order.shipments.map((sh) => ({
+          id: sh.id,
+          pharmacyName: sh.pharmacy.name,
+          status: sh.status,
+          speed: sh.speed,
+          items: sh.items,
+          cancelReason: sh.cancelReason,
+        }))
+      : [
+          {
+            id: order.id,
+            pharmacyName: 'Pharmacy',
+            status: order.status,
+            speed: 'STANDARD' as const,
+            items: order.items,
+            cancelReason: order.cancelReason,
+          },
+        ];
 
   return (
     <Screen padded={false} refreshing={refreshing} onRefresh={refresh} bottomInset={spacing.xxl}>
@@ -87,83 +112,123 @@ export const OrderTrackingScreen: React.FC<{ navigation: any; route: any }> = ({
             <Icon name="cancel" size={20} color={colors.error} />
             <Text variant="bodyMd" weight="medium" color={colors.onErrorContainer} style={styles.flex}>
               This order was cancelled.
+              {order.cancelReason ? ` ${order.cancelReason}` : ''}
             </Text>
           </Card>
-        ) : (
-          <Card style={styles.timeline}>
-            <Text variant="headlineSmMobile" color={colors.headingDark}>
-              Delivery Progress
-            </Text>
+        ) : null}
 
-            {STAGES.map((stage, i) => {
-              const done = i <= currentIndex;
-              const isLast = i === STAGES.length - 1;
+        {/*
+          One block per parcel, each with its own timeline and its own items.
+          An order filled by two shops has two independent journeys, and a
+          single merged progress bar would have to pick one of them to show —
+          telling the patient their order is "dispatched" while half of it is
+          still being packed.
+        */}
+        {parcels.map((parcel, index) => {
+          const stageIndex = STAGES.findIndex((st) => st.status === parcel.status);
+          const parcelCancelled = parcel.status === 'CANCELLED';
 
-              return (
-                <View key={stage.status} style={styles.stage}>
-                  <View style={styles.stageRail}>
-                    <View style={[styles.stageDot, done && styles.stageDotDone]}>
-                      <Icon
-                        name={stage.icon}
-                        size={16}
-                        color={done ? colors.onPrimary : colors.captionGray}
-                      />
+          return (
+            <Card key={parcel.id} style={styles.timeline}>
+              <View style={styles.parcelHead}>
+                <View style={styles.flex}>
+                  <Text variant="headlineSmMobile" color={colors.headingDark}>
+                    {parcels.length > 1 ? `Parcel ${index + 1} of ${parcels.length}` : 'Delivery'}
+                  </Text>
+                  <Text variant="captionSm" color={colors.captionGray}>
+                    {parcel.pharmacyName}
+                  </Text>
+                </View>
+                <StatusPill status={parcel.status} />
+              </View>
+
+              <View style={[styles.speed, parcel.speed === 'EXPRESS' && styles.speedExpress]}>
+                <Icon
+                  name={parcel.speed === 'EXPRESS' ? 'bolt' : 'local_shipping'}
+                  size={14}
+                  color={parcel.speed === 'EXPRESS' ? colors.successDark : colors.captionGray}
+                />
+                <Text
+                  variant="captionSm"
+                  weight="medium"
+                  color={parcel.speed === 'EXPRESS' ? colors.successDark : colors.captionGray}
+                >
+                  {parcel.speed === 'EXPRESS' ? 'Express · under 30 min' : 'Standard · 2 days'}
+                </Text>
+              </View>
+
+              {parcelCancelled ? (
+                <Text variant="captionSm" color={colors.error}>
+                  {parcel.cancelReason ?? 'This parcel was cancelled.'}
+                </Text>
+              ) : (
+                STAGES.map((stage, i) => {
+                  const done = i <= stageIndex;
+                  const isLast = i === STAGES.length - 1;
+
+                  return (
+                    <View key={stage.status} style={styles.stage}>
+                      <View style={styles.stageRail}>
+                        <View style={[styles.stageDot, done && styles.stageDotDone]}>
+                          <Icon
+                            name={stage.icon}
+                            size={16}
+                            color={done ? colors.onPrimary : colors.captionGray}
+                          />
+                        </View>
+                        {!isLast ? (
+                          <View style={[styles.stageLine, i < stageIndex && styles.stageLineDone]} />
+                        ) : null}
+                      </View>
+
+                      <View style={styles.stageBody}>
+                        <Text
+                          variant="bodyMd"
+                          weight={done ? 'semibold' : 'regular'}
+                          color={done ? colors.headingDark : colors.captionGray}
+                        >
+                          {stage.label}
+                        </Text>
+                        <Text variant="captionSm" color={colors.captionGray}>
+                          {stage.caption}
+                        </Text>
+                      </View>
                     </View>
-                    {!isLast ? (
-                      <View style={[styles.stageLine, i < currentIndex && styles.stageLineDone]} />
-                    ) : null}
-                  </View>
+                  );
+                })
+              )}
 
-                  <View style={styles.stageBody}>
-                    <Text
-                      variant="bodyMd"
-                      weight={done ? 'semibold' : 'regular'}
-                      color={done ? colors.headingDark : colors.captionGray}
-                    >
-                      {stage.label}
+              <View style={styles.rule} />
+
+              {parcel.items.map((item) => (
+                <View key={item.medicineId} style={styles.itemRow}>
+                  <View style={styles.itemThumb}>
+                    <Icon name="pill" size={18} color={colors.primary} />
+                  </View>
+                  <View style={styles.flex}>
+                    <Text variant="bodyMd" color={colors.headingDark} numberOfLines={1}>
+                      {item.name}
                     </Text>
                     <Text variant="captionSm" color={colors.captionGray}>
-                      {stage.caption}
+                      {item.quantity} × {rupees(item.price)}
                     </Text>
                   </View>
+                  <Text variant="bodyMd" weight="semibold" color={colors.headingDark}>
+                    {rupees(item.itemTotal)}
+                  </Text>
                 </View>
-              );
-            })}
-          </Card>
-        )}
+              ))}
+            </Card>
+          );
+        })}
 
         <Card style={styles.items}>
-          <Text variant="headlineSmMobile" color={colors.headingDark}>
-            Items
-          </Text>
-
-          {order.items.map((item) => (
-            <View key={item.medicineId} style={styles.itemRow}>
-              <View style={styles.itemThumb}>
-                <Icon name="pill" size={18} color={colors.primary} />
-              </View>
-              <View style={styles.flex}>
-                <Text variant="bodyMd" color={colors.headingDark} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Text variant="captionSm" color={colors.captionGray}>
-                  {item.quantity} × ${item.price.toFixed(2)}
-                </Text>
-              </View>
-              <Text variant="bodyMd" weight="semibold" color={colors.headingDark}>
-                ${item.itemTotal.toFixed(2)}
-              </Text>
-            </View>
-          ))}
-
-          <View style={styles.rule} />
-
           <View style={styles.itemRow}>
             <Text variant="bodyMd" weight="semibold" color={colors.headingDark} style={styles.flex}>
-              Total paid
+              Order total
             </Text>
             <Text variant="displayBold" color={colors.primary}>
-              ${order.totalAmount.toFixed(2)}
+              {rupees(order.totalAmount)}
             </Text>
           </View>
         </Card>
@@ -179,6 +244,18 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.base },
   cancelled: { flexDirection: 'row', alignItems: 'center', gap: spacing.insetCard },
+  parcelHead: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.insetCard },
+  speed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.inlineSm,
+    paddingHorizontal: spacing.base,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceContainerHigh,
+  },
+  speedExpress: { backgroundColor: colors.successLight },
   timeline: { gap: spacing.insetPage },
   stage: { flexDirection: 'row', gap: spacing.insetCard },
   stageRail: { alignItems: 'center', width: 32 },

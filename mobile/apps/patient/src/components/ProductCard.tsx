@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
-import { Card, Icon, Text, colors, radius, spacing } from '@healthbuddy/shared';
+import { Card, Icon, Text, colors, radius, rupees, spacing } from '@healthbuddy/shared';
 
 export interface ProductCardProps {
   title: string;
@@ -10,6 +10,10 @@ export interface ProductCardProps {
   originalPrice?: number;
   badge?: { label: string; tone: 'sale' | 'new' };
   outOfStock?: boolean;
+  /** How soon this can arrive, e.g. "Under 30 min". */
+  eta?: string;
+  /** Draws the ETA as a fast-delivery flash rather than plain text. */
+  express?: boolean;
   onPress?: () => void;
   onAdd?: () => void;
 }
@@ -25,6 +29,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   originalPrice,
   badge,
   outOfStock = false,
+  eta,
+  express = false,
   onPress,
   onAdd,
 }) => (
@@ -45,6 +51,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       ) : null}
     </View>
 
+    {/* The arrival time sits above the name, not beside the price: it is what
+        people scan for when they need something today, and reading it after
+        deciding on price means re-deciding. */}
+    {eta && !outOfStock ? (
+      <View style={[styles.eta, express && styles.etaExpress]}>
+        <Icon
+          name={express ? 'bolt' : 'local_shipping'}
+          size={12}
+          color={express ? colors.successDark : colors.captionGray}
+        />
+        <Text
+          variant="captionSm"
+          weight={express ? 'semibold' : 'regular'}
+          color={express ? colors.successDark : colors.captionGray}
+        >
+          {eta}
+        </Text>
+      </View>
+    ) : null}
+
     <Text variant="bodyMd" weight="semibold" color={colors.headingDark} numberOfLines={1}>
       {title}
     </Text>
@@ -57,11 +83,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     <View style={styles.footer}>
       <View style={styles.priceBlock}>
         <Text variant="bodyMd" weight="semibold" color={colors.primary}>
-          ${price.toFixed(2)}
+          {rupees(price)}
         </Text>
         {originalPrice && originalPrice > price ? (
           <Text variant="captionSm" color={colors.captionGray} style={styles.strike}>
-            ${originalPrice.toFixed(2)}
+            {rupees(originalPrice)}
           </Text>
         ) : null}
       </View>
@@ -114,6 +140,17 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
   },
   priceBlock: { gap: 0 },
+  eta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 3,
+    paddingHorizontal: spacing.stackMedium,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceContainerHigh,
+  },
+  etaExpress: { backgroundColor: colors.successLight },
   strike: { textDecorationLine: 'line-through' },
   addButton: {
     width: 36,

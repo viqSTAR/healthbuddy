@@ -24,6 +24,7 @@ import {
   type Appointment,
 } from '@healthbuddy/shared';
 import { DoctorTile } from '../../components/DoctorCard';
+import { LocationChip } from '../../components/LocationChip';
 
 const CATEGORIES = [
   { label: 'Physician', icon: 'stethoscope', tint: 'success' as const, specialty: 'General Physician' },
@@ -63,6 +64,12 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       bottomInset={spacing.xxl}
     >
       <TopBar brand onNotificationsPress={() => navigation.navigate('Notifications')} />
+
+      {/* Directly under the brand bar, matching the store: the delivery address
+          is context for everything below it, not a setting. */}
+      <View style={styles.locationWrap}>
+        <LocationChip onPress={() => navigation.navigate('AddressBook')} />
+      </View>
 
       <View style={styles.page}>
         <SearchBar onSubmit={() => navigation.navigate('Doctors')} />
@@ -217,6 +224,7 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  locationWrap: { paddingHorizontal: spacing.insetPage, paddingBottom: spacing.insetCard },
   page: { paddingHorizontal: spacing.insetPage, gap: spacing.xl },
   quickActions: { flexDirection: 'row', gap: spacing.base },
   appointmentCard: { gap: spacing.insetPage },

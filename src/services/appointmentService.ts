@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AppointmentType } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
+import { slotHasPassed } from '../utils/clock.js';
 import { notify } from './notificationService.js';
 import { refundForTargetService } from './paymentService.js';
 
@@ -48,12 +49,21 @@ export const bookAppointmentService = async (
 ) => {
   const slot = await prisma.doctorSlot.findUnique({
     where: { id: slotId },
-    select: { id: true, doctorId: true },
+    select: { id: true, doctorId: true, date: true, startTime: true },
   });
 
   if (!slot) throw notFound('Slot');
   if (slot.doctorId !== doctorId) {
     throw new AppError('That slot does not belong to the requested doctor.', 400);
+  }
+
+  /**
+   * A slot whose start has gone by cannot be attended, and booking one takes
+   * the patient's money for a consultation that can never happen. The listing
+   * hides these, but a stale screen or a direct call would still reach here.
+   */
+  if (slotHasPassed(slot.date, slot.startTime)) {
+    throw new AppError('That time has already passed. Please choose a later slot.', 400);
   }
 
   /**

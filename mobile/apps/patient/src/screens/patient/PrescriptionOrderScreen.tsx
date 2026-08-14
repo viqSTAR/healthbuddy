@@ -16,6 +16,7 @@ import {
   Input,
   Loading,
   radius,
+  rupees,
   Screen,
   SectionHeader,
   simulatePayment,
@@ -194,7 +195,7 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
 
     Alert.alert(
       'Ready to pay',
-      `₹${checkout.amount.toFixed(2)} is due. Your order is held until the payment goes through.`,
+      `${rupees(checkout.amount)} is due. Your order is held until the payment goes through.`,
       [{ text: 'Open my orders', onPress: goToOrders }]
     );
   };
@@ -336,7 +337,7 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
                 Total
               </Text>
               <Text variant="headlineSm" weight="bold" color={colors.primary}>
-                ₹{totals.grand.toFixed(0)}
+                {rupees(totals.grand)}
               </Text>
             </View>
           </Card>
@@ -345,8 +346,8 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
             <Button
               label={
                 method === 'COD'
-                  ? `Place order · pay ₹${totals.grand.toFixed(0)} on delivery`
-                  : `Pay ₹${totals.grand.toFixed(0)} and order`
+                  ? `Place order · pay ${rupees(totals.grand)} on delivery`
+                  : `Pay ${rupees(totals.grand)} and order`
               }
               icon="check_circle"
               iconPosition="right"
@@ -399,7 +400,7 @@ const MedicineRow: React.FC<{
           ) : (
             <View style={styles.tags}>
               <Text variant="captionSm" color={colors.captionGray}>
-                {line.quantity} × ₹{line.unitPrice} · {line.pharmacyName}
+                {line.quantity} × {rupees(line.unitPrice)} · {line.pharmacyName}
               </Text>
               {line.requiresPrescription ? <Badge label="Rx" tint="warning" /> : null}
             </View>
@@ -408,7 +409,7 @@ const MedicineRow: React.FC<{
 
         {!unavailable ? (
           <Text variant="labelMd" weight="bold" color={colors.primary}>
-            ₹{line.itemTotal}
+            {rupees(line.itemTotal)}
           </Text>
         ) : null}
       </Card>
@@ -453,7 +454,7 @@ const TestRow: React.FC<{
             <Text variant="captionSm" color={colors.captionGray}>
               {line.labPartnerName}
               {line.homeCollectionFee > 0
-                ? ` · +₹${line.homeCollectionFee} collection`
+                ? ` · +${rupees(line.homeCollectionFee)} collection`
                 : ' · free home collection'}
             </Text>
           )}
@@ -466,7 +467,7 @@ const TestRow: React.FC<{
 
         {!unavailable ? (
           <Text variant="labelMd" weight="bold" color={colors.primary}>
-            ₹{total}
+            {rupees(total)}
           </Text>
         ) : null}
       </Card>
@@ -516,7 +517,7 @@ const SummaryRow: React.FC<{ label: string; value: number; hint?: string }> = ({
       {label}
     </Text>
     <Text variant="bodyMd" weight="semibold" color={colors.onSurface}>
-      {hint ?? `₹${value.toFixed(0)}`}
+      {hint ?? rupees(value)}
     </Text>
   </View>
 );

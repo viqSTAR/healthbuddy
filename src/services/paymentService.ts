@@ -142,31 +142,57 @@ interface Chargeable {
   link: Prisma.PaymentUncheckedCreateInput;
 }
 
+/**
+ * One payee per shipment, each credited only with what it actually supplied.
+ *
+ * This used to credit the whole order total to `order.pharmacy` — a single
+ * shop. On a basket filled by two shops that paid one of them for the other's
+ * goods, and the wronged partner had no record to dispute it with, because the
+ * order never said which lines were theirs. `planSplit` has always accepted
+ * several payees; only the caller was pretending there was one.
+ */
 const resolveMedicineOrder = async (orderId: string, patientId: string): Promise<Chargeable> => {
   const order = await prisma.medicineOrder.findUnique({
     where: { id: orderId },
     include: {
       pharmacy: { select: { id: true, payoutAccountId: true, commissionPercent: true } },
+      shipments: {
+        where: { status: { not: 'CANCELLED' } },
+        select: {
+          subtotal: true,
+          pharmacy: { select: { id: true, payoutAccountId: true, commissionPercent: true } },
+        },
+      },
     },
   });
   // 404 rather than 403 so order ids cannot be probed across patients.
   if (!order || order.patientId !== patientId) throw notFound('Order');
   if (order.status === 'CANCELLED') throw conflict('This order was cancelled.');
 
+  const asPayee = (
+    pharmacy: { id: string; payoutAccountId: string | null; commissionPercent: number | null } | null,
+    goodsAmount: number
+  ): Payee => ({
+    type: 'PHARMACY',
+    id: pharmacy?.id ?? null,
+    payoutAccountId: pharmacy?.payoutAccountId ?? null,
+    commissionPercent: pharmacy?.commissionPercent ?? env.COMMISSION_PHARMACY_PCT,
+    goodsAmount,
+  });
+
+  // Orders placed before shipments existed have none; they still settle against
+  // the single pharmacy the row records.
+  const payees =
+    order.shipments.length > 0
+      ? order.shipments.map((s) => asPayee(s.pharmacy, s.subtotal))
+      : [asPayee(order.pharmacy, order.totalAmount)];
+
   return {
     purpose: 'MEDICINE_ORDER',
     amount: Number((order.totalAmount + order.deliveryFee).toFixed(2)),
     deliveryAmount: order.deliveryFee,
     description: 'Medicine order',
-    payees: [
-      {
-        type: 'PHARMACY',
-        id: order.pharmacy?.id ?? null,
-        payoutAccountId: order.pharmacy?.payoutAccountId ?? null,
-        commissionPercent: order.pharmacy?.commissionPercent ?? env.COMMISSION_PHARMACY_PCT,
-        goodsAmount: order.totalAmount,
-      },
-    ],
+    payees,
     link: { medicineOrderId: order.id } as Prisma.PaymentUncheckedCreateInput,
   };
 };
@@ -776,7 +802,17 @@ export const refundForTargetService = async (
     appointmentId?: string;
     fulfilmentId?: string;
   },
-  reason: string
+  reason: string,
+  /**
+   * A part-refund, when only one shipment of an order is being cancelled.
+   *
+   * `amount` is what to return; `splitPayeeId` is the partner whose leg is being
+   * reversed. Omit both for the whole payment, which is what cancelling an
+   * entire order does. A partial refund deliberately leaves the payment PAID:
+   * money is still owed to the shops still shipping, and marking the whole
+   * payment REFUNDED would tell the settlement job to claw all of it back.
+   */
+  partial?: { amount: number; splitPayeeId: string | null }
 ): Promise<{ refunded: boolean; amount: number }> => {
   if (Object.values(target).every((v) => !v)) return { refunded: false, amount: 0 };
 
@@ -801,6 +837,10 @@ export const refundForTargetService = async (
   }
 
   if (payment.method === 'COD') {
+    // Nothing was collected, so a part-cancellation on COD simply reduces what
+    // the rider will ask for. Only a whole cancellation closes the payment.
+    if (partial) return { refunded: true, amount: partial.amount };
+
     await prisma.payment.update({
       where: { id: payment.id },
       data: { status: 'REFUNDED', refundedAt: new Date(), refundReason: reason.slice(0, 300) },
@@ -809,7 +849,13 @@ export const refundForTargetService = async (
   }
 
   try {
-    const outstanding = payment.amount - payment.refundedAmount;
+    const remaining = payment.amount - payment.refundedAmount;
+    if (remaining <= 0) return { refunded: false, amount: 0 };
+
+    // Never return more than is still held, however the caller arrived at the
+    // figure — a gateway would reject it, and a rounding slip must not become
+    // a refund larger than the payment.
+    const outstanding = partial ? Math.min(partial.amount, remaining) : remaining;
     if (outstanding <= 0) return { refunded: false, amount: 0 };
 
     const { refundId } = await paymentProvider.refund(
@@ -818,19 +864,26 @@ export const refundForTargetService = async (
       reason
     );
 
+    const refundedTotal = Number((payment.refundedAmount + outstanding).toFixed(2));
+    const fullyRefunded = refundedTotal >= payment.amount - 0.005;
+
     await prisma.$transaction([
       prisma.payment.update({
         where: { id: payment.id },
         data: {
-          status: 'REFUNDED',
-          refundedAmount: payment.amount,
-          refundedAt: new Date(),
+          ...(fullyRefunded ? { status: 'REFUNDED' as const, refundedAt: new Date() } : {}),
+          refundedAmount: refundedTotal,
           refundReason: reason.slice(0, 300),
           gatewayRefundId: refundId,
         },
       }),
       prisma.paymentSplit.updateMany({
-        where: { paymentId: payment.id },
+        where: {
+          paymentId: payment.id,
+          // A partial refund reverses only the leg of the partner who is no
+          // longer shipping. The others are still owed.
+          ...(partial ? { payeeId: partial.splitPayeeId } : {}),
+        },
         data: { status: 'REVERSED' },
       }),
     ]);

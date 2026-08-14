@@ -7,6 +7,7 @@ import { Screen, SectionHeader, TopBar } from './Screen';
 import { StatTile } from './StatTile';
 import { StatusPill } from './StatusPill';
 import { Text } from './Text';
+import { rupees } from '../format';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/typography';
 import { useAsync } from '../hooks/useAsync';
@@ -47,13 +48,13 @@ export const EarningsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
 
       <View style={styles.stats}>
         <StatTile
-          value={`₹${(data?.settledTotal ?? 0).toFixed(0)}`}
+          value={rupees(data?.settledTotal ?? 0)}
           label="Settled"
           icon="account_balance"
           emphasis
         />
         <StatTile
-          value={`₹${(data?.pendingTotal ?? 0).toFixed(0)}`}
+          value={rupees(data?.pendingTotal ?? 0)}
           label="Awaiting settlement"
           icon="schedule"
         />
@@ -91,7 +92,7 @@ export const EarningsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
 
               <View style={styles.amount}>
                 <Text variant="labelMd" weight="bold" color={colors.primary}>
-                  ₹{line.amount.toFixed(2)}
+                  {rupees(line.amount)}
                 </Text>
                 <StatusPill status={line.status} />
               </View>

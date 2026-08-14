@@ -17,6 +17,7 @@ import {
   Loading,
   radius,
   removeLabOffering,
+  rupees,
   Screen,
   SearchBar,
   SectionHeader,
@@ -152,7 +153,7 @@ export const TestCatalogueScreen: React.FC<{ navigation: any }> = ({ navigation 
 
                   <View style={styles.priceBlock}>
                     <Text variant="headlineSm" weight="bold" color={colors.primary}>
-                      ₹{band?.price ?? offering.labPackage.price}
+                      {rupees(band?.price ?? offering.labPackage.price)}
                     </Text>
                     <Text variant="captionSm" color={colors.captionGray}>
                       set by area
@@ -254,7 +255,7 @@ const AddTestSheet: React.FC<{
               </Text>
               {(bandsByPackage.get(selected.id) ?? []).length === 0 ? (
                 <Text variant="labelMd" weight="semibold" color={colors.onSurface}>
-                  ₹{selected.price} · standard rate
+                  {rupees(selected.price)} · standard rate
                 </Text>
               ) : (
                 (bandsByPackage.get(selected.id) ?? []).map((band) => (
@@ -263,8 +264,8 @@ const AddTestSheet: React.FC<{
                       {band.scope}
                     </Text>
                     <Text variant="labelMd" weight="semibold" color={colors.onSurface}>
-                      ₹{band.price}
-                      {band.homeCollectionFee > 0 ? ` + ₹${band.homeCollectionFee}` : ' · free pickup'}
+                      {rupees(band.price)}
+                      {band.homeCollectionFee > 0 ? ` + ${rupees(band.homeCollectionFee)}` : ' · free pickup'}
                     </Text>
                   </View>
                 ))
@@ -325,7 +326,7 @@ const AddTestSheet: React.FC<{
                       {pkg.testName}
                     </Text>
                     <Text variant="captionSm" color={colors.captionGray}>
-                      {pkg.category} · ₹{band?.price ?? pkg.price}
+                      {pkg.category} · {rupees(band?.price ?? pkg.price)}
                     </Text>
                   </View>
                   <Icon

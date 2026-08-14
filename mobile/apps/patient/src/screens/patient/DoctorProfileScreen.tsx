@@ -16,6 +16,7 @@ import {
   colors,
   fetchDoctor,
   radius,
+  rupees,
   spacing,
   useAsync,
 } from '@healthbuddy/shared';
@@ -66,7 +67,7 @@ export const DoctorProfileScreen: React.FC<{ navigation: any; route: any }> = ({
           <View style={styles.stats}>
             <StatTile value={`${doctor.experienceYears}+`} label="Exp. Years" />
             <StatTile value={doctor.rating.toFixed(1)} label="Rating" icon="star" />
-            <StatTile value={`$${doctor.consultationFee.toFixed(0)}`} label="Per session" />
+            <StatTile value={rupees(doctor.consultationFee)} label="Per session" />
           </View>
 
           <View style={styles.group}>
@@ -105,7 +106,7 @@ export const DoctorProfileScreen: React.FC<{ navigation: any; route: any }> = ({
               <ListRow
                 icon="payments"
                 title="Consultation Fee"
-                subtitle={`$${doctor.consultationFee.toFixed(2)} per session`}
+                subtitle={`${rupees(doctor.consultationFee)} per session`}
                 showChevron={false}
               />
               <ListRow
@@ -137,7 +138,7 @@ export const DoctorProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 
       <View style={styles.footer}>
         <Button
-          label={`Book Consultation · $${doctor.consultationFee.toFixed(2)}`}
+          label={`Book Consultation · ${rupees(doctor.consultationFee)}`}
           fullWidth
           disabled={!doctor.isAvailable}
           onPress={() => navigation.navigate('BookConsultation', { doctorId: doctor.id })}

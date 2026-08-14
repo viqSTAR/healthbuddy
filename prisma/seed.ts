@@ -1,14 +1,19 @@
-import { PrismaClient, type DrugSchedule, type TeleDrugList } from '@prisma/client';
+import {
+  PrismaClient,
+  type DeliverySpeed,
+  type DrugSchedule,
+  type TeleDrugList,
+} from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 const DOCTORS = [
-  { phone: '+15551000001', name: 'Dr. Aisha Mehta', specialty: 'Cardiologist', qualification: 'MBBS, MD (Cardiology)', experienceYears: 12, consultationFee: 750, rating: 4.9, clinicAddress: 'Heart Care Center, 5th Avenue', reg: 'MH-2013-104521' },
-  { phone: '+15551000002', name: 'Dr. Nisha Rao', specialty: 'Dermatologist', qualification: 'MBBS, MD (Dermatology)', experienceYears: 8, consultationFee: 600, rating: 4.8, clinicAddress: 'Skin & Aesthetics Clinic', reg: 'MH-2017-118834' },
-  { phone: '+15551000003', name: 'Dr. Priya Sharma', specialty: 'General Physician', qualification: 'MBBS, MD (General Medicine)', experienceYears: 15, consultationFee: 500, rating: 5.0, clinicAddress: 'Wellness Medical Hub', reg: 'DL-2010-091277' },
-  { phone: '+15551000004', name: 'Dr. Robert Chen', specialty: 'Pediatrician', qualification: 'MBBS, DCH', experienceYears: 10, consultationFee: 650, rating: 4.9, clinicAddress: 'Kids First Health Center', reg: 'KA-2015-143902' },
-  { phone: '+15551000005', name: 'Dr. Marcus Vance', specialty: 'Orthopedic', qualification: 'MBBS, MS (Ortho)', experienceYears: 14, consultationFee: 800, rating: 4.7, clinicAddress: 'Bone & Joint Institute', reg: 'TN-2011-076615' },
-  { phone: '+15551000006', name: 'Dr. Leena Kapoor', specialty: 'Neurologist', qualification: 'MBBS, DM (Neurology)', experienceYears: 11, consultationFee: 900, rating: 4.8, clinicAddress: 'NeuroCare Specialty Clinic', reg: 'MH-2014-129048' },
+  { phone: '+15551000001', name: 'Dr. Aisha Mehta', specialty: 'Cardiologist', qualification: 'MBBS, MD (Cardiology)', experienceYears: 12, consultationFee: 750, rating: 4.9, clinicAddress: 'Heart Care Center, 5th Avenue', reg: 'MH-2013-104521', clinicCity: 'Mumbai', clinicState: 'Maharashtra', clinicPincode: '400058', latitude: 19.1364, longitude: 72.8296 },
+  { phone: '+15551000002', name: 'Dr. Nisha Rao', specialty: 'Dermatologist', qualification: 'MBBS, MD (Dermatology)', experienceYears: 8, consultationFee: 600, rating: 4.8, clinicAddress: 'Skin & Aesthetics Clinic', reg: 'MH-2017-118834', clinicCity: 'Mumbai', clinicState: 'Maharashtra', clinicPincode: '400053', latitude: 19.1400, longitude: 72.8250 },
+  { phone: '+15551000003', name: 'Dr. Priya Sharma', specialty: 'General Physician', qualification: 'MBBS, MD (General Medicine)', experienceYears: 15, consultationFee: 500, rating: 5.0, clinicAddress: 'Wellness Medical Hub', reg: 'DL-2010-091277', clinicCity: 'Delhi', clinicState: 'Delhi', clinicPincode: '110009', latitude: 28.7158, longitude: 77.1910 },
+  { phone: '+15551000004', name: 'Dr. Robert Chen', specialty: 'Pediatrician', qualification: 'MBBS, DCH', experienceYears: 10, consultationFee: 650, rating: 4.9, clinicAddress: 'Kids First Health Center', reg: 'KA-2015-143902', clinicCity: 'Bengaluru', clinicState: 'Karnataka', clinicPincode: '560001', latitude: 12.9716, longitude: 77.5946 },
+  { phone: '+15551000005', name: 'Dr. Marcus Vance', specialty: 'Orthopedic', qualification: 'MBBS, MS (Ortho)', experienceYears: 14, consultationFee: 800, rating: 4.7, clinicAddress: 'Bone & Joint Institute', reg: 'TN-2011-076615', clinicCity: 'Chennai', clinicState: 'Tamil Nadu', clinicPincode: '600001', latitude: 13.0827, longitude: 80.2707 },
+  { phone: '+15551000006', name: 'Dr. Leena Kapoor', specialty: 'Neurologist', qualification: 'MBBS, DM (Neurology)', experienceYears: 11, consultationFee: 900, rating: 4.8, clinicAddress: 'NeuroCare Specialty Clinic', reg: 'MH-2014-129048', clinicCity: 'Mumbai', clinicState: 'Maharashtra', clinicPincode: '400076', latitude: 19.1176, longitude: 72.9060 },
 ];
 
 /**
@@ -33,18 +38,21 @@ const MEDICINES: {
   schedule: DrugSchedule;
   teleList: TeleDrugList;
   requiresPrescription: boolean;
+  /// Express is opt-in per medicine. Anything needing cold chain, controlled
+  /// handling or a pharmacist's check stays STANDARD.
+  deliverySpeed: DeliverySpeed;
 }[] = [
-  { name: 'Paracetamol 500mg', category: 'Pain Relief', price: 25, stock: 250, description: 'Relieves mild to moderate fever and pain.', composition: 'Paracetamol IP 500mg', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
-  { name: 'Cetirizine 10mg', category: 'Allergy', price: 32, stock: 300, description: '24-hour allergy relief from sneezing and runny nose.', composition: 'Cetirizine Hydrochloride IP 10mg', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
-  { name: 'Vitamin C 1000mg', category: 'Supplements', price: 149, stock: 500, description: 'Immunity booster chewable tablets.', composition: 'Ascorbic Acid 1000mg', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
-  { name: 'Oral Rehydration Salts', category: 'Digestive Health', price: 22, stock: 400, description: 'Restores fluid and electrolyte balance.', composition: 'ORS WHO formula', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
-  { name: 'Ibuprofen 400mg', category: 'Pain Relief', price: 48, stock: 220, description: 'Anti-inflammatory for pain and swelling.', composition: 'Ibuprofen IP 400mg', schedule: 'SCHEDULE_H', teleList: 'LIST_A', requiresPrescription: true },
-  { name: 'Omeprazole 20mg', category: 'Digestive Health', price: 86, stock: 150, description: 'Relief from acid reflux and heartburn.', composition: 'Omeprazole IP 20mg', schedule: 'SCHEDULE_H', teleList: 'LIST_A', requiresPrescription: true },
-  { name: 'Amoxicillin 250mg', category: 'Antibiotics', price: 112, stock: 100, description: 'Broad-spectrum antibiotic for bacterial infections.', composition: 'Amoxicillin Trihydrate IP 250mg', schedule: 'SCHEDULE_H', teleList: 'LIST_B', requiresPrescription: true },
-  { name: 'Metformin 500mg', category: 'Diabetes', price: 74, stock: 180, description: 'Controls blood sugar in type 2 diabetes.', composition: 'Metformin Hydrochloride IP 500mg', schedule: 'SCHEDULE_H', teleList: 'LIST_B', requiresPrescription: true },
-  { name: 'Aspirin 75mg', category: 'Cardiac', price: 38, stock: 400, description: 'Low-dose blood thinner for heart health.', composition: 'Acetylsalicylic Acid IP 75mg', schedule: 'SCHEDULE_H', teleList: 'LIST_B', requiresPrescription: true },
-  { name: 'Alprazolam 0.25mg', category: 'Psychiatry', price: 55, stock: 0, description: 'Anxiolytic. Cannot be sold or prescribed online.', composition: 'Alprazolam IP 0.25mg', schedule: 'SCHEDULE_X', teleList: 'PROHIBITED', requiresPrescription: true },
-  { name: 'Tramadol 50mg', category: 'Pain Relief', price: 68, stock: 0, description: 'Opioid analgesic. Cannot be sold or prescribed online.', composition: 'Tramadol Hydrochloride IP 50mg', schedule: 'NARCOTIC', teleList: 'PROHIBITED', requiresPrescription: true },
+  { name: 'Paracetamol 500mg', deliverySpeed: 'EXPRESS', category: 'Pain Relief', price: 25, stock: 250, description: 'Relieves mild to moderate fever and pain.', composition: 'Paracetamol IP 500mg', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
+  { name: 'Cetirizine 10mg', deliverySpeed: 'EXPRESS', category: 'Allergy', price: 32, stock: 300, description: '24-hour allergy relief from sneezing and runny nose.', composition: 'Cetirizine Hydrochloride IP 10mg', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
+  { name: 'Vitamin C 1000mg', deliverySpeed: 'EXPRESS', category: 'Supplements', price: 149, stock: 500, description: 'Immunity booster chewable tablets.', composition: 'Ascorbic Acid 1000mg', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
+  { name: 'Oral Rehydration Salts', deliverySpeed: 'EXPRESS', category: 'Digestive Health', price: 22, stock: 400, description: 'Restores fluid and electrolyte balance.', composition: 'ORS WHO formula', schedule: 'OTC', teleList: 'LIST_O', requiresPrescription: false },
+  { name: 'Ibuprofen 400mg', deliverySpeed: 'STANDARD', category: 'Pain Relief', price: 48, stock: 220, description: 'Anti-inflammatory for pain and swelling.', composition: 'Ibuprofen IP 400mg', schedule: 'SCHEDULE_H', teleList: 'LIST_A', requiresPrescription: true },
+  { name: 'Omeprazole 20mg', deliverySpeed: 'STANDARD', category: 'Digestive Health', price: 86, stock: 150, description: 'Relief from acid reflux and heartburn.', composition: 'Omeprazole IP 20mg', schedule: 'SCHEDULE_H', teleList: 'LIST_A', requiresPrescription: true },
+  { name: 'Amoxicillin 250mg', deliverySpeed: 'STANDARD', category: 'Antibiotics', price: 112, stock: 100, description: 'Broad-spectrum antibiotic for bacterial infections.', composition: 'Amoxicillin Trihydrate IP 250mg', schedule: 'SCHEDULE_H', teleList: 'LIST_B', requiresPrescription: true },
+  { name: 'Metformin 500mg', deliverySpeed: 'STANDARD', category: 'Diabetes', price: 74, stock: 180, description: 'Controls blood sugar in type 2 diabetes.', composition: 'Metformin Hydrochloride IP 500mg', schedule: 'SCHEDULE_H', teleList: 'LIST_B', requiresPrescription: true },
+  { name: 'Aspirin 75mg', deliverySpeed: 'STANDARD', category: 'Cardiac', price: 38, stock: 400, description: 'Low-dose blood thinner for heart health.', composition: 'Acetylsalicylic Acid IP 75mg', schedule: 'SCHEDULE_H', teleList: 'LIST_B', requiresPrescription: true },
+  { name: 'Alprazolam 0.25mg', deliverySpeed: 'STANDARD', category: 'Psychiatry', price: 55, stock: 0, description: 'Anxiolytic. Cannot be sold or prescribed online.', composition: 'Alprazolam IP 0.25mg', schedule: 'SCHEDULE_X', teleList: 'PROHIBITED', requiresPrescription: true },
+  { name: 'Tramadol 50mg', deliverySpeed: 'STANDARD', category: 'Pain Relief', price: 68, stock: 0, description: 'Opioid analgesic. Cannot be sold or prescribed online.', composition: 'Tramadol Hydrochloride IP 50mg', schedule: 'NARCOTIC', teleList: 'PROHIBITED', requiresPrescription: true },
 ];
 
 const LAB_PACKAGES = [
@@ -57,9 +65,39 @@ const LAB_PACKAGES = [
   { testName: 'Liver Function Test (LFT)', category: 'Gastroenterology', price: 799, sampleType: 'Blood', fastingReq: true },
 ];
 
+/**
+ * `serves` is the list of pincodes each shop delivers to, and it is what decides
+ * whether the store opens at all for a given address.
+ *
+ * The two Mumbai shops deliberately overlap on 400058 and stock different
+ * things: QuickMeds carries only the fast-moving over-the-counter lines, so a
+ * basket of paracetamol plus an antibiotic is sourced from two shops and
+ * becomes two shipments. Without an overlap like this, every order would resolve
+ * to a single pharmacy and the split would never be exercised.
+ */
 const PHARMACIES = [
-  { phone: '+15552000001', name: 'Health Buddy Central Pharmacy', address: '221 Wellness Road, Andheri West', city: 'Mumbai', state: 'Maharashtra', pincode: '400058', licence: 'MH-RTL-20-114523', markup: 1.0 },
-  { phone: '+15552000002', name: 'CarePlus Chemists', address: '14 Model Town, Sector 9', city: 'Delhi', state: 'Delhi', pincode: '110009', licence: 'DL-RTL-20-089114', markup: 0.94 },
+  {
+    phone: '+15552000001', name: 'Health Buddy Central Pharmacy',
+    address: '221 Wellness Road, Andheri West', city: 'Mumbai', state: 'Maharashtra',
+    pincode: '400058', licence: 'MH-RTL-20-114523', markup: 1.0,
+    serves: ['400058', '400053', '400061', '400076'],
+    stocksEverything: true,
+  },
+  {
+    phone: '+15552000002', name: 'CarePlus Chemists',
+    address: '14 Model Town, Sector 9', city: 'Delhi', state: 'Delhi',
+    pincode: '110009', licence: 'DL-RTL-20-089114', markup: 0.94,
+    serves: ['110009', '110007', '110033'],
+    stocksEverything: true,
+  },
+  {
+    phone: '+15552000003', name: 'QuickMeds Andheri',
+    address: '7 Lokhandwala Complex, Andheri West', city: 'Mumbai', state: 'Maharashtra',
+    pincode: '400053', licence: 'MH-RTL-21-160882', markup: 0.88,
+    serves: ['400058', '400053'],
+    // Cheapest on the shelf, but only carries what turns over quickly.
+    stocksEverything: false,
+  },
 ];
 
 const LABS = [
@@ -153,6 +191,11 @@ async function main() {
       consultationFee: d.consultationFee,
       rating: d.rating,
       clinicAddress: d.clinicAddress,
+      clinicCity: d.clinicCity,
+      clinicState: d.clinicState,
+      clinicPincode: d.clinicPincode,
+      latitude: d.latitude,
+      longitude: d.longitude,
       councilRegistrationNumber: d.reg,
       councilName: 'National Medical Commission',
       verifiedAt: new Date(),
@@ -205,7 +248,19 @@ async function main() {
       create: { userId: user.id, ...profile },
     });
 
-    for (const med of catalogue.filter((m) => isSellable(m.schedule))) {
+    for (const pincode of p.serves) {
+      await prisma.pharmacyServiceArea.upsert({
+        where: { pharmacyId_pincode: { pharmacyId: pharmacy.id, pincode } },
+        update: {},
+        create: { pharmacyId: pharmacy.id, pincode },
+      });
+    }
+
+    const shelf = catalogue
+      .filter((m) => isSellable(m.schedule))
+      .filter((m) => p.stocksEverything || m.deliverySpeed === 'EXPRESS');
+
+    for (const med of shelf) {
       await prisma.pharmacyInventory.upsert({
         where: {
           pharmacyId_medicineId: { pharmacyId: pharmacy.id, medicineId: med.id },

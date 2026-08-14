@@ -10,6 +10,7 @@ import {
   Text,
   colors,
   radius,
+  rupees,
   spacing,
   type Appointment,
 } from '@healthbuddy/shared';
@@ -71,7 +72,7 @@ export const AppointmentConfirmedScreen: React.FC<{ navigation: any; route: any 
             icon="payments"
             label="Fee"
             value={
-              appointment.doctor ? `$${appointment.doctor.consultationFee.toFixed(2)}` : '—'
+              appointment.doctor ? rupees(appointment.doctor.consultationFee) : '—'
             }
           />
           {appointment.meetingRoomId ? (

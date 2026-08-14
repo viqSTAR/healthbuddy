@@ -27,6 +27,7 @@ import { MedicalRecordsScreen } from '../screens/patient/MedicalRecordsScreen';
 import { PrescriptionScreen } from '../screens/patient/PrescriptionScreen';
 import { PrescriptionOrderScreen } from '../screens/patient/PrescriptionOrderScreen';
 import { ProfileScreen } from '../screens/patient/ProfileScreen';
+import { AddressBookScreen } from '../screens/patient/AddressBookScreen';
 import { EditProfileScreen } from '../screens/patient/EditProfileScreen';
 
 // Pharmacy (patient-facing)
@@ -132,6 +133,7 @@ export const RootNavigator: React.FC = () => {
             {/* The consent gate between a prescription and a real order. */}
             <Stack.Screen name="PrescriptionOrder" component={PrescriptionOrderScreen} />
             <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+            <Stack.Screen name="AddressBook" component={AddressBookScreen} />
 
             <Stack.Screen name="JoinLobby" component={JoinLobbyScreen} />
             <Stack.Screen

@@ -20,6 +20,7 @@ import {
   Loading,
   radius,
   recordStockMovement,
+  rupees,
   Screen,
   SearchBar,
   SectionHeader,
@@ -172,7 +173,7 @@ const InventoryRow: React.FC<{ item: InventoryItem; onPress: () => void }> = ({
             {item.medicine.name}
           </Text>
           <Text variant="captionSm" color={colors.captionGray}>
-            ₹{item.price} · {item.medicine.category}
+            {rupees(item.price)} · {item.medicine.category}
           </Text>
 
           <View style={styles.tags}>
@@ -693,7 +694,7 @@ const AddItemSheet: React.FC<{
     if (Number(price) > selected.price) {
       Alert.alert(
         'Above MRP',
-        `${selected.name} cannot be listed above its printed MRP of ₹${selected.price}.`
+        `${selected.name} cannot be listed above its printed MRP of ${rupees(selected.price)}.`
       );
       return;
     }
@@ -731,7 +732,7 @@ const AddItemSheet: React.FC<{
               {selected.name}
             </Text>
             <Text variant="captionSm" color={colors.captionGray}>
-              {selected.composition ?? selected.category} · MRP ₹{selected.price}
+              {selected.composition ?? selected.category} · MRP {rupees(selected.price)}
             </Text>
 
             <Input
@@ -810,7 +811,7 @@ const AddItemSheet: React.FC<{
                         {medicine.name}
                       </Text>
                       <Text variant="captionSm" color={colors.captionGray}>
-                        {medicine.category} · MRP ₹{medicine.price}
+                        {medicine.category} · MRP {rupees(medicine.price)}
                       </Text>
                     </View>
                     <Icon

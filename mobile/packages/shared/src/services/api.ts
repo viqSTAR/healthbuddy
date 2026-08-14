@@ -8,15 +8,41 @@ import { Platform } from 'react-native';
 import * as tokenStore from './tokenStore';
 
 /**
+ * An Android emulator is not on the LAN, whatever its bundle host says.
+ *
+ * It sits behind its own NAT and reaches the dev machine only through the
+ * 10.0.2.2 alias. A request aimed at the machine's LAN address instead leaves
+ * that NAT and arrives back as external traffic, which Windows Firewall drops
+ * unless someone has opened the port — so the emulator has to be settled before
+ * the host-derived branch below, or the app resolves an address it can never
+ * reach and every screen fails at "cannot reach the server".
+ */
+const isAndroidEmulator = (): boolean => {
+  if (Platform.OS !== 'android') return false;
+  const { Fingerprint = '', Model = '', Brand = '' } = Platform.constants;
+  return (
+    Fingerprint.startsWith('generic') ||
+    Fingerprint.startsWith('unknown') ||
+    Fingerprint.includes('sdk_gphone') ||
+    Model.startsWith('sdk_') ||
+    Model.includes('Emulator') ||
+    Model.includes('Android SDK built for') ||
+    Brand.startsWith('generic')
+  );
+};
+
+/**
  * Resolves the API base URL.
  *
- * Order: an explicit EXPO_PUBLIC_API_URL, then the host that served the Expo
- * bundle (so a physical device reaches the dev machine rather than its own
- * loopback), then platform loopback defaults.
+ * Order: an explicit EXPO_PUBLIC_API_URL, then the Android emulator alias, then
+ * the host that served the Expo bundle (so a physical device reaches the dev
+ * machine rather than its own loopback), then platform loopback defaults.
  */
 const resolveBaseUrl = (): string => {
   const configured = process.env.EXPO_PUBLIC_API_URL;
   if (configured) return configured.replace(/\/+$/, '');
+
+  if (isAndroidEmulator()) return 'http://10.0.2.2:5000/api/v1';
 
   const hostUri =
     Constants.expoConfig?.hostUri ??
@@ -29,7 +55,6 @@ const resolveBaseUrl = (): string => {
     }
   }
 
-  // Android emulators reach the host machine through 10.0.2.2, not localhost.
   return Platform.OS === 'android'
     ? 'http://10.0.2.2:5000/api/v1'
     : 'http://localhost:5000/api/v1';

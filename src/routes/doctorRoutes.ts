@@ -89,6 +89,17 @@ router.get(
     query: paginationSchema.extend({
       specialty: z.string().trim().max(80).optional(),
       query: z.string().trim().max(80).optional(),
+      /**
+       * IN_PERSON narrows the list to clinics the patient can reach and sorts by
+       * distance. VIDEO does not narrow at all — a consultation over video is
+       * not constrained by where either party is.
+       */
+      visitType: z.enum(['VIDEO', 'IN_PERSON']).optional(),
+      pincode: z
+        .string()
+        .trim()
+        .regex(/^[1-9][0-9]{5}$/, 'Enter a valid 6-digit pincode.')
+        .optional(),
     }),
   }),
   getDoctorsHandler

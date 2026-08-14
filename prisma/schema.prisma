@@ -98,6 +98,25 @@ enum OrderStatus {
   CANCELLED
 }
 
+/// How quickly a medicine can reach a patient.
+///
+/// Set per catalogue medicine by an admin rather than per pharmacy, because the
+/// promise is about the product — cold-chain insulin cannot go on a scooter in
+/// twenty minutes however close the shop is, and a paracetamol strip can.
+enum DeliverySpeed {
+  /// Same-hour from a nearby shop. The default is deliberately not this.
+  EXPRESS
+  /// Next day or later, by courier.
+  STANDARD
+}
+
+/// What a saved address is for, so the picker can label it without free text.
+enum AddressLabel {
+  HOME
+  WORK
+  OTHER
+}
+
 enum LabOrderStatus {
   PENDING_PAYMENT
   BOOKED
@@ -311,6 +330,7 @@ model User {
   payments             Payment[]
   auditLogs            AuditLog[]
   assignedOrders       MedicineOrder[]       @relation("OrderAgent")
+  assignedShipments    Shipment[]            @relation("ShipmentAgent")
   assignedLabOrders    LabOrder[]            @relation("LabOrderAgent")
 
   @@index([phoneNumber])
@@ -342,6 +362,64 @@ model Patient {
   emergencyLogs  EmergencySOS[]
   fulfilments    PrescriptionFulfilment[]
   tipDeliveries  HealthTipDelivery[]
+  addresses      Address[]
+}
+
+/// One saved delivery address.
+///
+/// `Patient.address` remains as the single free-text address older rows carry;
+/// this is the structured book the app writes to now. The pincode is the field
+/// that matters operationally — serviceability, which pharmacies can be reached
+/// and what an order may promise are all decided from it, so it is required
+/// even though the rest of the address is not.
+model Address {
+  id        String       @id @default(uuid())
+  patientId String
+  patient   Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  label     AddressLabel @default(HOME)
+
+  /// Free-text house/flat and street, as the patient typed or the map returned.
+  line1     String
+  line2     String?
+  city      String?
+  state     String?
+  pincode   String
+  landmark  String?
+
+  /// Present when the address came from the device's location rather than being
+  /// typed. Used to pick the nearest stocking pharmacy.
+  latitude  Float?
+  longitude Float?
+
+  /// Exactly one default per patient is enforced in the service, not the
+  /// schema: a partial unique index cannot be expressed in Prisma, and a plain
+  /// unique on (patientId, isDefault) would forbid a second non-default row.
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders MedicineOrder[]
+
+  @@index([patientId])
+  @@index([pincode])
+}
+
+/// A pincode a pharmacy delivers to.
+///
+/// Serviceability is declared, not inferred from a radius: a straight-line
+/// distance says nothing about whether a river, a state border or simply the
+/// shop's own willingness stands between them. A pharmacy listing a pincode is
+/// making a commitment, which is what an order needs to rely on.
+model PharmacyServiceArea {
+  id         String   @id @default(uuid())
+  pharmacyId String
+  pharmacy   Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  pincode    String
+  createdAt  DateTime @default(now())
+
+  @@unique([pharmacyId, pincode])
+  @@index([pincode])
 }
 
 model Doctor {
@@ -358,6 +436,15 @@ model Doctor {
   languages       String?
   clinicAddress   String?
   isAvailable     Boolean @default(true)
+
+  /// Where the clinic physically is. Only in-person visits use this — a video
+  /// consultation reaches anywhere, so filtering the whole doctor list by
+  /// location would hide doctors who could perfectly well take the patient.
+  clinicCity      String?
+  clinicState     String?
+  clinicPincode   String?
+  latitude        Float?
+  longitude       Float?
 
   /// Registration number issued by the NMC / State Medical Council. The
   /// Telemedicine Practice Guidelines require this on every prescription.
@@ -420,8 +507,10 @@ model Pharmacy {
   // field existed; @updatedAt still maintains it on every write.
   updatedAt DateTime @default(now()) @updatedAt
 
-  orders    MedicineOrder[]
-  inventory PharmacyInventory[]
+  orders       MedicineOrder[]
+  inventory    PharmacyInventory[]
+  shipments    Shipment[]
+  serviceAreas PharmacyServiceArea[]
 
   @@index([isActive])
 }
@@ -749,6 +838,10 @@ model Medicine {
   teleList             TeleDrugList @default(LIST_O)
   requiresPrescription Boolean      @default(false)
 
+  /// Defaults to STANDARD so a newly catalogued drug never silently promises a
+  /// speed nobody has agreed to fulfil. An admin opts each medicine in.
+  deliverySpeed DeliverySpeed @default(STANDARD)
+
   createdAt DateTime @default(now())
 
   inventory  PharmacyInventory[]
@@ -857,12 +950,63 @@ model MedicineOrder {
   deliveredAt         DateTime?
   cancelReason        String?
 
+  /// The saved address this was sent to, when the patient picked one. The
+  /// `address` string above stays the authoritative record of where the order
+  /// actually went: a book entry can be edited or deleted afterwards, and an
+  /// order must never silently change the address it was delivered to.
+  addressId String?
+  addressRef Address? @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  pincode   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  payment Payment?
+  payment   Payment?
+  shipments Shipment[]
 
   @@index([patientId])
+  @@index([pharmacyId, status])
+  @@index([assignedAgentUserId])
+}
+
+/// The part of an order one pharmacy is responsible for.
+///
+/// A basket is not necessarily fillable by a single shop: each line is sourced
+/// from whichever pharmacy has it cheapest and in stock, so a three-item order
+/// can legitimately involve three shops, arriving separately.
+///
+/// Before this existed the whole order was assigned to whichever pharmacy
+/// supplied the most lines, which meant a partner saw items it had never
+/// stocked, against stock reserved on somebody else's shelf. The order is the
+/// patient's view of the purchase; the shipment is the unit that is actually
+/// accepted, packed, dispatched and paid out.
+model Shipment {
+  id         String        @id @default(uuid())
+  orderId    String
+  order      MedicineOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  pharmacyId String
+  pharmacy   Pharmacy      @relation(fields: [pharmacyId], references: [id])
+
+  /// The lines this shop is filling, same shape as `MedicineOrder.items`.
+  items    Json
+  subtotal Float
+
+  /// The slowest line decides the parcel: a box cannot arrive before the thing
+  /// in it that takes longest.
+  speed  DeliverySpeed @default(STANDARD)
+  status OrderStatus   @default(PLACED)
+
+  assignedAgentUserId String?
+  assignedAgent       User?     @relation("ShipmentAgent", fields: [assignedAgentUserId], references: [id])
+  acceptedAt          DateTime?
+  dispatchedAt        DateTime?
+  deliveredAt         DateTime?
+  cancelReason        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
   @@index([pharmacyId, status])
   @@index([assignedAgentUserId])
 }

@@ -16,6 +16,7 @@ import {
   Icon,
   Loading,
   radius,
+  rupees,
   Screen,
   SearchBar,
   SectionHeader,
@@ -142,7 +143,7 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
 
                 <View style={styles.testFoot}>
                   <Text variant="displayBold" color={colors.primary}>
-                    ${pkg.price.toFixed(2)}
+                    {rupees(pkg.price)}
                   </Text>
                   <Button
                     label="Book test"

@@ -16,14 +16,16 @@ import {
 } from '../middlewares/auth.js';
 
 export const getDoctorsHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { specialty, query, page, limit } = req.query as unknown as {
+  const { specialty, query, page, limit, visitType, pincode } = req.query as unknown as {
     specialty?: string;
     query?: string;
     page: number;
     limit: number;
+    visitType?: 'VIDEO' | 'IN_PERSON';
+    pincode?: string;
   };
 
-  const result = await getDoctorsService(specialty, query, page, limit);
+  const result = await getDoctorsService(specialty, query, page, limit, visitType, pincode);
   res.status(200).json({ success: true, count: result.doctors.length, ...result });
 });
 

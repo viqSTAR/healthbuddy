@@ -18,6 +18,7 @@ import {
   Icon,
   Loading,
   radius,
+  rupees,
   Screen,
   SectionHeader,
   spacing,
@@ -193,7 +194,7 @@ export const BookingsScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
 
                 <View style={styles.footer}>
                   <Text variant="headlineSm" weight="bold" color={colors.primary}>
-                    ₹{order.price}
+                    {rupees(order.price)}
                   </Text>
 
                   {unclaimed ? (

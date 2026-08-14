@@ -13,6 +13,7 @@ import {
   Input,
   ListRow,
   Loading,
+  rupees,
   Screen,
   SectionHeader,
   spacing,
@@ -160,7 +161,7 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
         </Card>
       ) : (
         <Card padded={false}>
-          <ListRow icon="payments" title="Consultation fee" value={`₹${doctor.consultationFee}`} />
+          <ListRow icon="payments" title="Consultation fee" value={rupees(doctor.consultationFee)} />
           <ListRow icon="medical_services" title="Specialty" value={doctor.specialty} />
           <ListRow
             icon="timeline"

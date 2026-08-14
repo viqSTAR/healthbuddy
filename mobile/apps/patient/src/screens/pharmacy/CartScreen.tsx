@@ -8,39 +8,53 @@ import {
   EmptyState,
   errorMessage,
   Icon,
-  Input,
   placeMedicineOrder,
   radius,
+  rupees,
   Screen,
   spacing,
   Text,
   TopBar,
 } from '@healthbuddy/shared';
 import { useCart } from '../../services/cart';
+import { useLocation } from '../../services/location';
 
-const DELIVERY_FEE = 2.5;
-
-/** Mirrors `medicine_cart`: line items with steppers, address, order summary. */
+/**
+ * Mirrors `medicine_cart`: line items with steppers, address, order summary.
+ *
+ * The total shown here is the line items and nothing else, because that is
+ * exactly what the server bills: `placeMedicineOrder` sums item totals and adds
+ * no delivery charge. A fee invented on the client would quote the patient one
+ * number and take another at checkout — and since the gateway splits the amount
+ * it actually captured, the difference would never reconcile.
+ */
 export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const cart = useCart();
-  const [address, setAddress] = useState('');
+  const { selected, serviceability } = useLocation();
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const total = Number((cart.subtotal + (cart.lines.length ? DELIVERY_FEE : 0)).toFixed(2));
+  const total = cart.subtotal;
 
   const checkout = async () => {
-    if (address.trim().length < 5) {
-      setError('Enter a delivery address of at least 5 characters.');
+    if (!selected) {
+      setError('Choose a delivery address first.');
+      return;
+    }
+    if (serviceability?.serviceable === false) {
+      setError(`We don't deliver to ${selected.pincode} yet.`);
       return;
     }
 
     setError(null);
     setPlacing(true);
     try {
+      // The saved address is sent by id, not as text: the server re-reads the
+      // pincode from it and sources only from shops that serve there, so the
+      // basket cannot be checked out to somewhere its prices never applied.
       const order = await placeMedicineOrder({
         items: cart.lines.map((l) => ({ medicineId: l.medicine.id, quantity: l.quantity })),
-        address: address.trim(),
+        addressId: selected.id,
       });
       cart.clear();
       navigation.replace('OrderTracking', { orderId: order.id });
@@ -72,6 +86,39 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         <TopBar title="Your Cart" onBack={navigation.goBack} />
 
         <View style={styles.page}>
+          <Pressable
+            onPress={() => navigation.navigate('AddressBook')}
+            style={styles.addressRow}
+          >
+            <Icon name="location_on" size={20} color={colors.primary} />
+            <View style={styles.flex}>
+              <Text variant="captionSm" weight="semibold" color={colors.primary}>
+                Deliver to
+              </Text>
+              <Text variant="captionSm" color={colors.headingDark} numberOfLines={1}>
+                {selected
+                  ? [selected.line1, selected.city, selected.pincode].filter(Boolean).join(', ')
+                  : 'Choose an address'}
+              </Text>
+            </View>
+            <Text variant="captionSm" weight="medium" color={colors.primary}>
+              Change
+            </Text>
+          </Pressable>
+
+          {/* Split into parcels here rather than at the confirmation screen —
+              "arrives separately" changes what people order, so it belongs
+              where they can still change their mind. */}
+          {cart.parcels.length > 1 ? (
+            <View style={styles.splitNote}>
+              <Icon name="local_shipping" size={16} color={colors.warningDark} />
+              <Text variant="captionSm" color={colors.warningDark} style={styles.flex}>
+                This order will arrive in {cart.parcels.length} separate parcels, from{' '}
+                {cart.parcels.length} pharmacies.
+              </Text>
+            </View>
+          ) : null}
+
           {cart.lines.map((line) => (
             <Card key={line.medicine.id} padding={spacing.insetCard} style={styles.line}>
               <View style={styles.thumb}>
@@ -83,7 +130,7 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                   {line.medicine.name}
                 </Text>
                 <Text variant="captionSm" color={colors.captionGray}>
-                  ${line.medicine.price.toFixed(2)} each
+                  {rupees(line.medicine.price)} each
                 </Text>
 
                 <View style={styles.stepper}>
@@ -101,10 +148,11 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
                   <Pressable
                     onPress={() => cart.setQuantity(line.medicine.id, line.quantity + 1)}
-                    disabled={line.quantity >= line.medicine.stock}
+                    disabled={line.quantity >= (line.medicine.available ?? line.medicine.stock)}
                     style={[
                       styles.stepButton,
-                      line.quantity >= line.medicine.stock && styles.stepDisabled,
+                      line.quantity >= (line.medicine.available ?? line.medicine.stock) &&
+                        styles.stepDisabled,
                     ]}
                     accessibilityLabel="Increase quantity"
                   >
@@ -115,7 +163,7 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
               <View style={styles.lineRight}>
                 <Text variant="bodyMd" weight="semibold" color={colors.primary}>
-                  ${(line.medicine.price * line.quantity).toFixed(2)}
+                  {rupees(line.medicine.price * line.quantity)}
                 </Text>
                 <Pressable onPress={() => cart.remove(line.medicine.id)} hitSlop={8}>
                   <Icon name="delete" size={18} color={colors.error} />
@@ -124,27 +172,20 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             </Card>
           ))}
 
-          <Input
-            label="Delivery address"
-            icon="location_on"
-            placeholder="Flat, street, city"
-            value={address}
-            onChangeText={(t) => {
-              setAddress(t);
-              setError(null);
-            }}
-            error={error ?? undefined}
-            maxLength={300}
-          />
+          {error ? (
+            <Text variant="captionSm" color={colors.error}>
+              {error}
+            </Text>
+          ) : null}
 
           <Card style={styles.summary}>
             <Text variant="headlineSmMobile" color={colors.headingDark}>
               Order Summary
             </Text>
-            <SummaryRow label="Subtotal" value={`$${cart.subtotal.toFixed(2)}`} />
-            <SummaryRow label="Delivery" value={`$${DELIVERY_FEE.toFixed(2)}`} />
+            <SummaryRow label="Subtotal" value={rupees(cart.subtotal)} />
+            <SummaryRow label="Delivery" value="Free" />
             <View style={styles.rule} />
-            <SummaryRow label="Total" value={`$${total.toFixed(2)}`} emphasis />
+            <SummaryRow label="Total" value={rupees(total)} emphasis />
           </Card>
         </View>
       </Screen>
@@ -155,7 +196,7 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             Total
           </Text>
           <Text variant="displayBold" color={colors.headingDark}>
-            ${total.toFixed(2)}
+            {rupees(total)}
           </Text>
         </View>
         <Button label="Place Order" onPress={checkout} loading={placing} style={styles.footerCta} />
@@ -188,6 +229,23 @@ const SummaryRow: React.FC<{ label: string; value: string; emphasis?: boolean }>
 );
 
 const styles = StyleSheet.create({
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.insetCard,
+    padding: spacing.insetCard,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceContainerLowest,
+  },
+  splitNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.base,
+    padding: spacing.insetCard,
+    borderRadius: radius.md,
+    backgroundColor: colors.warningLight,
+  },
+  flex: { flex: 1 },
   page: { paddingHorizontal: spacing.insetPage, gap: spacing.insetPage },
   line: { flexDirection: 'row', gap: spacing.insetCard, alignItems: 'flex-start' },
   thumb: {

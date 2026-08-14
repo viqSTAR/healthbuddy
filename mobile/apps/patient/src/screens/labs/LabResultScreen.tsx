@@ -13,6 +13,7 @@ import {
   colors,
   fetchMyLabOrders,
   radius,
+  rupees,
   spacing,
   useAsync,
   type LabOrder,
@@ -176,7 +177,7 @@ export const LabResultScreen: React.FC<{ navigation: any; route: any }> = ({
             Amount paid
           </Text>
           <Text variant="displayBold" color={colors.primary}>
-            ${order.price.toFixed(2)}
+            {rupees(order.price)}
           </Text>
         </Card>
       </View>

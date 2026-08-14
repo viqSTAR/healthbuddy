@@ -15,6 +15,7 @@ import {
   Icon,
   Loading,
   radius,
+  rupees,
   Screen,
   spacing,
   Text,
@@ -88,7 +89,7 @@ export const BookConsultationScreen: React.FC<{ navigation: any; route: any }> =
                   {doctor.data.name}
                 </Text>
                 <Text variant="captionSm" color={colors.captionGray}>
-                  {doctor.data.specialty} · ${doctor.data.consultationFee.toFixed(2)}
+                  {doctor.data.specialty} · {rupees(doctor.data.consultationFee)}
                 </Text>
               </View>
             </Card>

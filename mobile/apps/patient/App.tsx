@@ -6,6 +6,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider, colors, useAppFonts } from '@healthbuddy/shared';
 
 import { CartProvider } from './src/services/cart';
+import { LocationProvider } from './src/services/location';
+import { ToastProvider } from './src/components/Toast';
 import { RootNavigator } from './src/navigation/RootNavigator';
 
 // Hold the native splash until Inter has loaded, so no frame renders in a
@@ -32,9 +34,17 @@ export default function App() {
         <StatusBar style="dark" />
         {/* appId routes push notifications to this install specifically. */}
         <AuthProvider appId="PATIENT">
-          <CartProvider>
-            <RootNavigator />
-          </CartProvider>
+          {/* Location wraps the cart: what is in the basket, and at what price,
+              is only meaningful once we know where it is going. */}
+          <LocationProvider>
+            <CartProvider>
+              {/* Outermost of the three so a toast can be raised from anywhere,
+                  and draws last so it sits above the navigator. */}
+              <ToastProvider>
+                <RootNavigator />
+              </ToastProvider>
+            </CartProvider>
+          </LocationProvider>
         </AuthProvider>
       </View>
     </SafeAreaProvider>

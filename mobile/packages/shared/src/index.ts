@@ -13,6 +13,9 @@ export { useAppFonts } from './theme/useAppFonts';
 /* UI primitives */
 export * from './ui';
 
+/* Formatting */
+export { rupees } from './format';
+
 /* Hooks */
 export { useAsync } from './hooks/useAsync';
 export { useProviderApplication } from './hooks/useProviderApplication';
