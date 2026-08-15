@@ -1,4 +1,6 @@
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
+import { prisma } from '../config/db.js';
+import { env } from '../config/env.js';
 import {
   createPrescriptionService,
   getPatientPrescriptionsService,
@@ -7,6 +9,10 @@ import {
   type MedicineLine,
   type LabTestLine,
 } from '../services/prescriptionService.js';
+import {
+  renderPrescriptionService,
+  verifyPrescriptionService,
+} from '../services/prescriptionPrintService.js';
 import {
   asyncHandler,
   requireUser,
@@ -80,3 +86,42 @@ export const getPrescriptionByIdHandler = asyncHandler(
     res.status(200).json({ success: true, prescription });
   }
 );
+
+/**
+ * The printable prescription.
+ *
+ * Returns HTML rather than JSON: the client opens it in a browser and prints
+ * to PDF, which means the layout is fixed by the platform and cannot be
+ * reassembled by a caller into something that omits the mandatory fields.
+ */
+export const printPrescriptionHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = requireUser(req);
+
+    const [patient, doctor] = await Promise.all([
+      prisma.patient.findUnique({ where: { userId: user.userId }, select: { id: true } }),
+      prisma.doctor.findUnique({ where: { userId: user.userId }, select: { id: true } }),
+    ]);
+
+    const { html } = await renderPrescriptionService(
+      (req.params as { id: string }).id,
+      {
+        ...(patient ? { patientId: patient.id } : {}),
+        ...(doctor ? { doctorId: doctor.id } : {}),
+      },
+      env.PUBLIC_BASE_URL
+    );
+
+    res.status(200).type('html').send(html);
+  }
+);
+
+/**
+ * The public check. No authentication: the code travels on a printed sheet and
+ * the whole point is that whoever holds it can verify it. It answers who issued
+ * the prescription and when — never what was prescribed.
+ */
+export const verifyPrescriptionHandler = asyncHandler(async (req: Request, res: Response) => {
+  const result = await verifyPrescriptionService((req.params as { code: string }).code);
+  res.status(200).json({ success: true, ...result });
+});

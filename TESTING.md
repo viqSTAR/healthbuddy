@@ -342,6 +342,51 @@ account is still a `PATIENT`; the pharmacy queue returns 403.
 To see List B unlock: book a **second** appointment with the same doctor. It is
 flagged as a follow-up and List B becomes available.
 
+### B2. The visit is the spine
+
+Records is organised around the consultation, not the table each artefact lives
+in. Everything a visit produced hangs off it.
+
+1. **Patient app** → *Records* → *Visits*. Each card names the doctor, the day
+   and time, and — for a video visit not yet held — a **Join** button.
+2. The join button is **time-gated by the server**, not the device: it reads
+   *"Opens in 8 h"* until `VIDEO_JOIN_LEAD_MINUTES` before the slot. A phone
+   with a wrong clock cannot talk its way in early.
+3. Open the completed visit. It reads top to bottom as the episode happened:
+   what you reported → diagnosis → medicines with dosage and duration → tests
+   advised → advice → who issued it and under which registration number.
+4. Medicines ordered and tests booked from that prescription appear under the
+   same visit, each with its own status.
+
+There is deliberately **no Prescriptions tab**. Every prescription belongs to
+exactly one appointment, so a separate list would show the same things twice
+under two names. Reports keep their own tab because a patient can book a test
+without ever seeing a doctor.
+
+### B3. A prescription you can print and check
+
+1. On a completed visit → **Print or save as PDF**. A page opens carrying the
+   diagnosis, every drug with dosage and duration, the tests advised, the
+   advice, the issuing doctor and their council registration number.
+2. At the bottom is an 8-character code and a verification address.
+3. Open `/api/v1/prescriptions/verify/<CODE>` in a browser — **no login**.
+
+What to confirm: the check answers *who* issued it and *when*, and **nothing
+clinical**. No diagnosis, no drug names, no patient name. The code travels on a
+piece of paper that anyone might pick up, so it must not be a key to a medical
+record.
+
+> **The doctor owns the letterhead; the platform owns the body.** Clinic name,
+> address, phone, logo and signature come from the doctor's profile. The
+> mandatory fields cannot be moved or removed — full customisation would let a
+> prescription be styled into something that is no longer one.
+
+Two things to try that should fail:
+
+- Print another patient's prescription → **404**, not 403
+- Verify a made-up code → `200 {"valid": false}`, not a 404 that confirms which
+  codes exist
+
 ### C. Pharmacy: stock and orders
 
 1. **Partner app** as `+15552000001` → *Stock*.
@@ -478,6 +523,36 @@ where shrinkage would otherwise hide.
 
 Then check the access control: the report is served only to that patient, the
 lab that produced it, a treating doctor, or an admin. It is **not** a public URL.
+
+### D2. Not every test ends in a PDF
+
+A lab package declares what it actually owes at the end, and whether a
+phlebotomist can come to the patient at all.
+
+| Test | Delivers | Collected at home? |
+| --- | --- | --- |
+| Complete Blood Count | `DIGITAL_REPORT` — a PDF | yes |
+| CT Scan — Abdomen | `DIGITAL_IMAGING` — report **plus** an image study | no |
+| Chest X-Ray | `PHYSICAL` — a film that has to travel | no |
+
+1. **Patient app** → *Labs*. The cards say which is which: *Home collection* or
+   *Visit the lab*, plus *Film delivered* / *Report + images* where relevant.
+2. Book the CBC → it asks for an address if you have not set one, then confirms
+   collection from that address.
+3. Book the Chest X-Ray → it books as a lab visit and says so, without asking
+   for an address.
+
+Two things to try that should fail:
+
+- Book an X-ray with `homeCollection: true` → **400**, *"has to be done at the
+  lab"*
+- Book a CBC with `homeCollection: true` and no address → **400**, *"A
+  collection address is required"*
+
+> **Why the delivery mode is copied onto the order.** Re-classifying a test in
+> the catalogue tomorrow must not rewrite what an order placed today promised
+> the patient. Same reason the price is copied, and the same reason a medicine
+> order snapshots its address rather than pointing at the address book.
 
 ### E. Paying for a prescription basket
 

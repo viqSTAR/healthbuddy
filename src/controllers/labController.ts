@@ -3,6 +3,7 @@ import type { LabOrderStatus } from '@prisma/client';
 import {
   getLabPackagesService,
   bookLabTestService,
+  type BookLabTestInput,
   getPatientLabOrdersService,
   getPatientLabOrderByIdService,
   getLabQueueService,
@@ -29,8 +30,7 @@ export const getLabPackagesHandler = asyncHandler(async (req: AuthenticatedReque
 });
 
 export const bookLabTestHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { testId, address } = req.body as { testId: string; address?: string };
-  const order = await bookLabTestService(requirePatientId(req), testId, address);
+  const order = await bookLabTestService(requirePatientId(req), req.body as BookLabTestInput);
   res.status(201).json({ success: true, message: 'Lab test booked.', order });
 });
 

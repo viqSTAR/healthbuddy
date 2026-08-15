@@ -24,9 +24,69 @@ export const getLabPackagesService = async (category?: string, page = 1, limit =
 };
 
 /** Price is read from the catalogue, never accepted from the client. */
-export const bookLabTestService = async (patientId: string, testId: string, address?: string) => {
-  const pkg = await prisma.labPackage.findUnique({ where: { id: testId } });
+export interface BookLabTestInput {
+  testId: string;
+  /** A saved address. The only form that carries a pincode we have validated. */
+  addressId?: string;
+  /** Typed address, for a patient who has not saved one. */
+  address?: string;
+  /**
+   * Whether a phlebotomist should come to the patient. Only offered for tests
+   * the catalogue says can be collected at home — an MRI cannot be.
+   */
+  homeCollection?: boolean;
+}
+
+/**
+ * Books a test.
+ *
+ * Two things are copied from the catalogue at booking time rather than joined
+ * later: the price, which must never come from the client, and the delivery
+ * mode, so that re-classifying a test tomorrow cannot rewrite what an order
+ * placed today promised the patient.
+ */
+export const bookLabTestService = async (patientId: string, input: BookLabTestInput) => {
+  const pkg = await prisma.labPackage.findUnique({ where: { id: input.testId } });
   if (!pkg) throw notFound('Lab package');
+
+  const wantsHomeCollection = input.homeCollection ?? Boolean(input.addressId ?? input.address);
+
+  if (wantsHomeCollection && !pkg.homeCollection) {
+    throw new AppError(
+      `${pkg.testName} has to be done at the lab — it cannot be collected at home.`,
+      400
+    );
+  }
+
+  // Resolve the address. Copied, not referenced: a book entry can be edited
+  // after the fact, and a collection visit must record where it actually went.
+  let addressText: string | null = null;
+  let pincode: string | null = null;
+  let addressId: string | null = null;
+
+  if (input.addressId) {
+    const saved = await prisma.address.findFirst({
+      where: { id: input.addressId, patientId },
+      select: {
+        id: true, line1: true, line2: true, landmark: true,
+        city: true, state: true, pincode: true, latitude: true, longitude: true,
+      },
+    });
+    if (!saved) throw notFound('Address');
+
+    addressId = saved.id;
+    pincode = saved.pincode;
+    addressText = [saved.line1, saved.line2, saved.landmark, saved.city, saved.state, saved.pincode]
+      .filter((part): part is string => Boolean(part && part.trim()))
+      .join(', ');
+  } else if (input.address?.trim()) {
+    addressText = input.address.trim();
+  }
+
+  // A phlebotomist cannot be sent to an address nobody gave.
+  if (wantsHomeCollection && !addressText) {
+    throw new AppError('A collection address is required for home collection.', 400);
+  }
 
   return prisma.labOrder.create({
     data: {
@@ -34,7 +94,11 @@ export const bookLabTestService = async (patientId: string, testId: string, addr
       testName: pkg.testName,
       price: pkg.price,
       status: 'BOOKED',
-      address: address?.trim() || 'Home sample collection',
+      deliveryMode: pkg.deliveryMode,
+      homeCollection: wantsHomeCollection,
+      address: addressText ?? 'Visit the lab',
+      ...(addressId ? { addressId } : {}),
+      ...(pincode ? { pincode } : {}),
     },
     include: { patient: { select: { id: true, fullName: true } } },
   });

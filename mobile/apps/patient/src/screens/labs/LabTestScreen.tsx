@@ -4,6 +4,7 @@ import {
   Alert,
   Badge,
   bookLabTest,
+  type LabPackage,
   Button,
   Card,
   Chip,
@@ -26,6 +27,7 @@ import {
   useAsync,
 } from '@healthbuddy/shared';
 import { PromoBanner } from '../../components/PromoBanner';
+import { useLocation } from '../../services/location';
 
 const CATEGORIES = [
   'Preventive Care',
@@ -42,6 +44,7 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
   const [category, setCategory] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [bookingId, setBookingId] = useState<string | null>(null);
+  const { selected } = useLocation();
 
   const { data, loading, error, refreshing, refresh, reload } = useAsync(
     () => fetchLabPackages(category ? { category } : {}),
@@ -57,14 +60,36 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
     );
   }, [data, query]);
 
-  const book = async (testId: string, testName: string) => {
+  const book = async (pkg: LabPackage) => {
+    const testId = pkg.id;
+
+    // A test that must be attended is never booked against an address, and one
+    // that can be collected needs a real one — sending a phlebotomist to
+    // "somewhere" is worse than asking first.
+    if (pkg.homeCollection && !selected) {
+      Alert.alert('Where should we collect?', 'Add a delivery address so we know where to send the phlebotomist.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Add address', onPress: () => navigation.navigate('AddressBook') },
+      ]);
+      return;
+    }
+
     setBookingId(testId);
     try {
-      const order = await bookLabTest({ testId });
-      Alert.alert('Test booked', `${testName} is scheduled. We'll collect your sample soon.`, [
-        { text: 'View order', onPress: () => navigation.navigate('LabResult', { orderId: order.id }) },
-        { text: 'OK' },
-      ]);
+      const order = await bookLabTest({
+        testId,
+        ...(pkg.homeCollection && selected ? { addressId: selected.id, homeCollection: true } : { homeCollection: false }),
+      });
+      Alert.alert(
+        'Test booked',
+        pkg.homeCollection
+          ? `${pkg.testName} is scheduled. We'll collect your sample from ${selected?.line1 ?? 'your address'}.`
+          : `${pkg.testName} is booked. Please visit the lab — this test cannot be collected at home.`,
+        [
+          { text: 'View order', onPress: () => navigation.navigate('LabResult', { orderId: order.id }) },
+          { text: 'OK' },
+        ]
+      );
     } catch (err) {
       Alert.alert('Could not book', errorMessage(err));
     } finally {
@@ -138,7 +163,18 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
                   ) : (
                     <Badge label="No fasting" tint="success" icon="check_circle" />
                   )}
-                  <Badge label="Home collection" tint="info" icon="home" />
+                  {pkg.homeCollection ? (
+                    <Badge label="Home collection" tint="info" icon="home" />
+                  ) : (
+                    <Badge label="Visit the lab" tint="neutral" icon="local_hospital" />
+                  )}
+                  {/* Said up front because it changes what the patient gets:
+                      a scan produces films and a viewer, not just a PDF. */}
+                  {pkg.deliveryMode === 'PHYSICAL' ? (
+                    <Badge label="Film delivered" tint="warning" icon="local_shipping" />
+                  ) : pkg.deliveryMode === 'DIGITAL_IMAGING' ? (
+                    <Badge label="Report + images" tint="info" icon="image" />
+                  ) : null}
                 </View>
 
                 <View style={styles.testFoot}>
@@ -149,7 +185,7 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
                     label="Book test"
                     size="md"
                     loading={bookingId === pkg.id}
-                    onPress={() => book(pkg.id, pkg.testName)}
+                    onPress={() => book(pkg)}
                   />
                 </View>
               </Card>

@@ -5,11 +5,27 @@ import {
   getMyPrescriptionsHandler,
   getPrescriptionByIdHandler,
   getPrescribableMedicinesHandler,
+  printPrescriptionHandler,
+  verifyPrescriptionHandler,
 } from '../controllers/prescriptionController.js';
 import { authenticateJwt, authorizeRoles } from '../middlewares/auth.js';
 import { validate, uuidSchema } from '../middlewares/validate.js';
 
 const router = Router();
+
+/**
+ * Public: confirms a printed prescription is genuine.
+ *
+ * Mounted before the auth guard deliberately. Whoever is holding the paper —
+ * a pharmacist, the patient's family — must be able to check it without an
+ * account, which is the entire reason the code is printed. It reveals the
+ * issuer and the date and nothing clinical.
+ */
+router.get(
+  '/verify/:code',
+  validate({ params: z.object({ code: z.string().trim().min(6).max(16) }) }),
+  verifyPrescriptionHandler
+);
 
 router.use(authenticateJwt);
 
@@ -79,6 +95,13 @@ router.get(
   authorizeRoles('PATIENT', 'DOCTOR'),
   validate({ params: z.object({ id: uuidSchema }) }),
   getPrescriptionByIdHandler
+);
+
+/** Patient or issuing doctor only; the service checks which. */
+router.get(
+  '/:id/print',
+  validate({ params: z.object({ id: uuidSchema }) }),
+  printPrescriptionHandler
 );
 
 export default router;

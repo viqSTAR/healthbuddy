@@ -55,14 +55,23 @@ const MEDICINES: {
   { name: 'Tramadol 50mg', deliverySpeed: 'STANDARD', category: 'Pain Relief', price: 68, stock: 0, description: 'Opioid analgesic. Cannot be sold or prescribed online.', composition: 'Tramadol Hydrochloride IP 50mg', schedule: 'NARCOTIC', teleList: 'PROHIBITED', requiresPrescription: true },
 ];
 
+/**
+ * `deliveryMode` decides what the lab owes at the end, and `homeCollection`
+ * whether a phlebotomist can come to the patient. The imaging rows exist so the
+ * two paths that are not "a PDF arrives" are exercised by real data: an X-ray
+ * produces a report plus a study, and its film is a physical object that has to
+ * travel — which makes it a parcel, not a download.
+ */
 const LAB_PACKAGES = [
-  { testName: 'Full Body Health Checkup', category: 'Preventive Care', price: 1999, sampleType: 'Blood & Urine', fastingReq: true },
-  { testName: 'Lipid Profile & Cholesterol Test', category: 'Cardiology', price: 699, sampleType: 'Blood', fastingReq: true },
-  { testName: 'Thyroid Stimulating Hormone (TSH)', category: 'Endocrinology', price: 449, sampleType: 'Blood', fastingReq: false },
-  { testName: 'Complete Blood Count (CBC)', category: 'General', price: 349, sampleType: 'Blood', fastingReq: false },
-  { testName: 'HbA1c Diabetes Monitoring', category: 'Diabetology', price: 549, sampleType: 'Blood', fastingReq: false },
-  { testName: 'Vitamin D Total', category: 'Nutrition', price: 1299, sampleType: 'Blood', fastingReq: false },
-  { testName: 'Liver Function Test (LFT)', category: 'Gastroenterology', price: 799, sampleType: 'Blood', fastingReq: true },
+  { testName: 'Full Body Health Checkup', category: 'Preventive Care', price: 1999, sampleType: 'Blood & Urine', fastingReq: true, deliveryMode: 'DIGITAL_REPORT' as const, homeCollection: true },
+  { testName: 'Lipid Profile & Cholesterol Test', category: 'Cardiology', price: 699, sampleType: 'Blood', fastingReq: true, deliveryMode: 'DIGITAL_REPORT' as const, homeCollection: true },
+  { testName: 'Thyroid Stimulating Hormone (TSH)', category: 'Endocrinology', price: 449, sampleType: 'Blood', fastingReq: false, deliveryMode: 'DIGITAL_REPORT' as const, homeCollection: true },
+  { testName: 'Complete Blood Count (CBC)', category: 'General', price: 349, sampleType: 'Blood', fastingReq: false, deliveryMode: 'DIGITAL_REPORT' as const, homeCollection: true },
+  { testName: 'HbA1c Diabetes Monitoring', category: 'Diabetology', price: 549, sampleType: 'Blood', fastingReq: false, deliveryMode: 'DIGITAL_REPORT' as const, homeCollection: true },
+  { testName: 'Vitamin D Total', category: 'Nutrition', price: 1299, sampleType: 'Blood', fastingReq: false, deliveryMode: 'DIGITAL_REPORT' as const, homeCollection: true },
+  { testName: 'Liver Function Test (LFT)', category: 'Gastroenterology', price: 799, sampleType: 'Blood', fastingReq: true, deliveryMode: 'DIGITAL_REPORT' as const, homeCollection: true },
+  { testName: 'Chest X-Ray (PA view)', category: 'Radiology', price: 599, sampleType: 'Imaging', fastingReq: false, deliveryMode: 'PHYSICAL' as const, homeCollection: false },
+  { testName: 'CT Scan — Abdomen', category: 'Radiology', price: 4499, sampleType: 'Imaging', fastingReq: true, deliveryMode: 'DIGITAL_IMAGING' as const, homeCollection: false },
 ];
 
 /**

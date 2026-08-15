@@ -217,6 +217,65 @@ rider app later — see §10.
 
 ---
 
+### The visit is the spine of a patient's history
+
+Consultations, prescriptions, medicine orders and lab bookings live in four
+tables that share a patient id. Presenting them as four flat lists is presenting
+the schema, not the history — nobody thinks "my third prescription", they think
+"that time I saw Dr Sharma about my chest, and what she put me on".
+
+So `visitService` gathers an `Appointment` with everything downstream of it:
+
+```
+Appointment ─┬─ symptoms, attached photos
+             └─ Prescription (1:1, appointmentId is unique)
+                  ├─ PrescribedMedicine[]
+                  ├─ PrescribedLabTest[]
+                  └─ PrescriptionFulfilment
+                       ├─ MedicineOrder[] → Shipment[]
+                       └─ LabOrder[]
+```
+
+Orders are reached *through the fulfilment*, not by matching patient and date:
+an order belongs to a consultation because a prescription from that consultation
+produced it, and nothing weaker is a reliable link.
+
+**The join gate is decided server-side** and reads its window from
+`VIDEO_JOIN_LEAD_MINUTES` — the same value the join endpoint enforces. It was
+briefly a separate hardcoded constant, which meant raising the env var would
+have left the button offering an action the API then refused.
+
+**A visit list never carries the meeting room id**, only `hasRoom`. That
+identifier is a bearer credential: anyone holding it can walk into the
+consultation.
+
+### The printed prescription
+
+`prescriptionPrintService` renders a self-contained HTML page — letterhead
+images inlined as data URIs, because the bucket is private and its links expire,
+so a printed sheet referencing one would break the next day.
+
+Two rules shape it:
+
+**The doctor owns the letterhead; the platform owns the body.** Clinic name,
+address, phone, logo and signature come from the doctor's profile. The
+registration number, date, drug list and issuing doctor are rendered from
+structured fields and cannot be moved or removed — those are what make the
+document valid under the Telemedicine Practice Guidelines.
+
+**Verification reveals authenticity, never content.** Every prescription carries
+an 8-character code resolving to a public endpoint that answers *issued by Dr X,
+registration Y, on date Z* and stops. Paper prescriptions are forged routinely
+and a pharmacist has no way to check one; this makes the platform's version
+checkable, which is also the argument that gets a doctor to stop reaching for
+the pad. Putting the diagnosis behind that code would be handing out medical
+records to whoever finds the paper.
+
+The alphabet excludes I, L, O and U, so a code read off paper cannot be mistyped
+into a different valid one.
+
+---
+
 ## 6. Journey: lab test → report
 
 ```mermaid
@@ -233,6 +292,29 @@ stateDiagram-v2
 Reports are **private documents**, not URLs. Readable only by the patient, the
 lab that produced them, a doctor with a real consultation relationship, or an
 admin — and every read is written to the audit log.
+
+### Not every test ends in a PDF
+
+`LabPackage.deliveryMode` says what the lab actually owes:
+
+| Mode | Produces | Arrives as |
+| --- | --- | --- |
+| `DIGITAL_REPORT` | CBC, lipid, TSH | a file in the app |
+| `DIGITAL_IMAGING` | CT, MRI | a report **plus** an image study — the radiologist's findings are a separate artefact from the images |
+| `PHYSICAL` | X-ray film, specimen | an object that has to travel |
+
+Only the last is a delivery, and it has a from, a to, a status and a courier —
+which is exactly `Shipment`. Reusing it means a patient gets one consistent
+"where is my thing" experience whether it is medicine or a film, and the admin
+delivery board covers both without new screens.
+
+`homeCollection` is the mirror image: a phlebotomist travelling *to* the
+patient. It is a property of the test, not a preference — an MRI cannot come to
+your house — so booking one at home is refused rather than quietly downgraded.
+
+Both are **copied onto the order at booking time**. Re-classifying a test in the
+catalogue tomorrow must not rewrite what an order placed today promised, for the
+same reason the price is copied and a medicine order snapshots its address.
 
 ---
 
@@ -311,6 +393,9 @@ broke, and it has six regression tests guarding it.
 | Location-scoped catalogue at each area's real prices | `pharmacyService.ts` |
 | Multi-pharmacy orders split into per-shop shipments | `shipmentService.ts` |
 | Per-shipment settlement legs and partial refunds | `paymentService.ts` |
+| Patient history organised by visit, with a server-gated join | `visitService.ts` |
+| Printable prescription with letterhead and public verification | `prescriptionPrintService.ts` |
+| Lab delivery modes: report, imaging study, physical film | `labService.ts` |
 
 ### Stock: a ledger, not a number
 

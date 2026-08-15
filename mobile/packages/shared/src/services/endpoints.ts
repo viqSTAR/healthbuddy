@@ -276,6 +276,14 @@ export interface MedicineOrder {
   payment?: { method: PaymentMethod; status: PaymentStatus; amount: number } | null;
 }
 
+/**
+ * What the lab owes at the end of a test.
+ *
+ * Not a delivery method but an obligation. Only PHYSICAL involves something
+ * travelling to the patient; the other two arrive in the app.
+ */
+export type LabDeliveryMode = 'DIGITAL_REPORT' | 'DIGITAL_IMAGING' | 'PHYSICAL';
+
 export interface LabPackage {
   id: string;
   testName: string;
@@ -284,6 +292,9 @@ export interface LabPackage {
   sampleType: string;
   fastingReq: boolean;
   description?: string | null;
+  deliveryMode: LabDeliveryMode;
+  /** False for anything the patient must attend for — an MRI cannot come home. */
+  homeCollection: boolean;
 }
 
 export type LabOrderStatus =
@@ -303,6 +314,12 @@ export interface LabOrder {
   price: number;
   status: LabOrderStatus;
   address: string | null;
+  /** Copied at booking time, so re-classifying the test later cannot rewrite it. */
+  deliveryMode?: LabDeliveryMode;
+  /** True when a phlebotomist is travelling to the patient. */
+  homeCollection?: boolean;
+  pincode?: string | null;
+  addressId?: string | null;
   reportUrl: string | null;
   scheduledAt: string | null;
   collectedAt: string | null;
@@ -897,8 +914,14 @@ export const fetchLabOffers = async (labPackageId: string) =>
 export const fetchLabPackages = async (params?: { category?: string }) =>
   (await api.get<{ packages: LabPackage[]; total: number }>('/labs/packages', { params })).data;
 
-export const bookLabTest = async (payload: { testId: string; address?: string }) =>
-  (await api.post<{ order: LabOrder }>('/labs/book', payload)).data.order;
+export const bookLabTest = async (payload: {
+  testId: string;
+  /** Prefer a saved address — it is the only form carrying a known pincode. */
+  addressId?: string;
+  address?: string;
+  /** Omitted means "infer from whether an address was given". */
+  homeCollection?: boolean;
+}) => (await api.post<{ order: LabOrder }>('/labs/book', payload)).data.order;
 
 export const fetchMyLabOrders = async () =>
   (await api.get<{ orders: LabOrder[] }>('/labs/my-orders')).data.orders;
@@ -931,6 +954,130 @@ export const fetchMyProfile = async () =>
 
 export const updateMyProfile = async (payload: Partial<PatientProfile>) =>
   (await api.put<{ patient: PatientProfile }>('/patients/me', payload)).data.patient;
+
+/* ---------- Visits: the consultation and what came out of it ---------- */
+
+/**
+ * Whether the Join button is live, and if not, why.
+ *
+ * The server decides this rather than the app comparing clocks: a device with a
+ * wrong time would otherwise offer a join link hours early, or refuse a
+ * consultation that is actually running.
+ */
+export interface JoinState {
+  available: boolean;
+  /** Minutes until it becomes live. Null once it is, or never will be. */
+  opensInMinutes: number | null;
+  /** Why it is unavailable, for the button's own label. Null when available. */
+  reason: string | null;
+}
+
+export interface VisitSummary {
+  id: string;
+  type: 'VIDEO' | 'IN_PERSON';
+  status: Appointment['status'];
+  symptoms: string | null;
+  isFollowUp: boolean;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  doctor: { id: string; name: string; specialty: string; clinicAddress: string | null };
+  slot: { date: string; startTime: string; endTime: string };
+  join: JoinState;
+  /** Never the room id itself — that is a bearer credential. */
+  hasRoom: boolean;
+  prescription: {
+    id: string;
+    issuedAt: string;
+    medicineCount: number;
+    labTestCount: number;
+  } | null;
+  counts: { medicineOrders: number; labOrders: number; attachments: number };
+}
+
+export interface VisitDetail extends Omit<VisitSummary, 'prescription' | 'counts'> {
+  prescription: (Prescription & {
+    items: {
+      id: string;
+      medicineId: string | null;
+      name: string;
+      dosage: string;
+      frequency: string;
+      durationDays: number | null;
+      instructions: string | null;
+    }[];
+    labTests: {
+      id: string;
+      labPackageId: string | null;
+      testName: string;
+      instructions: string | null;
+      urgent: boolean;
+    }[];
+    fulfilment: { id: string; status: string; expiresAt: string } | null;
+  }) | null;
+  medicineOrders: {
+    id: string;
+    status: OrderStatus;
+    totalAmount: number;
+    createdAt: string;
+    shipments: {
+      id: string;
+      status: OrderStatus;
+      speed: DeliverySpeed;
+      pharmacy: { id: string; name: string };
+    }[];
+  }[];
+  labOrders: {
+    id: string;
+    testName: string;
+    status: LabOrder['status'];
+    price: number;
+    scheduledAt: string | null;
+    completedAt: string | null;
+    createdAt: string;
+  }[];
+  documents: {
+    id: string;
+    kind: string;
+    fileName: string;
+    mimeType: string;
+    createdAt: string;
+  }[];
+}
+
+/**
+ * The printable prescription's URL.
+ *
+ * Returned as a link rather than fetched: the page is opened in a browser so
+ * the platform's layout — and the mandatory fields inside it — reach the
+ * printer exactly as rendered, instead of being reassembled by the app.
+ *
+ * Note this carries no token, so it only works where a session cookie or a
+ * local dev server applies. Printing from a real device will need a signed
+ * link, the same way documents already work.
+ */
+export const prescriptionPrintUrl = (prescriptionId: string) =>
+  `${API_BASE_URL}/prescriptions/${prescriptionId}/print`;
+
+/** Public: confirms a printed prescription is genuine. Issuer and date only. */
+export const verifyPrescription = async (code: string) =>
+  (
+    await api.get<{
+      valid: boolean;
+      issuedOn?: string;
+      doctorName?: string;
+      specialty?: string;
+      clinic?: string | null;
+      registrationNumber?: string | null;
+      consultationMode?: 'VIDEO' | 'IN_PERSON';
+    }>(`/prescriptions/verify/${encodeURIComponent(code)}`)
+  ).data;
+
+export const fetchVisits = async () =>
+  (await api.get<{ visits: VisitSummary[] }>('/patients/me/visits')).data.visits;
+
+export const fetchVisit = async (id: string) =>
+  (await api.get<{ visit: VisitDetail }>(`/patients/me/visits/${id}`)).data.visit;
 
 export const fetchMedicalRecords = async () =>
   (

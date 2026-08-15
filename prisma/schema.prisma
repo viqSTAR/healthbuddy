@@ -117,6 +117,21 @@ enum AddressLabel {
   OTHER
 }
 
+/// What a lab actually hands over when a test is done.
+///
+/// Not a delivery method but an obligation: it decides whether the result is a
+/// file the patient downloads, a study that also needs a viewer, or a physical
+/// object that has to travel — and only the last of those becomes a parcel.
+enum LabDeliveryMode {
+  /// A PDF. Arrives in the app; nothing physical moves.
+  DIGITAL_REPORT
+  /// A report plus an image study — the radiologist's findings are a separate
+  /// artefact from the images themselves.
+  DIGITAL_IMAGING
+  /// Film or specimen that must physically reach the patient.
+  PHYSICAL
+}
+
 enum LabOrderStatus {
   PENDING_PAYMENT
   BOOKED
@@ -331,6 +346,7 @@ model User {
   auditLogs            AuditLog[]
   assignedOrders       MedicineOrder[]       @relation("OrderAgent")
   assignedShipments    Shipment[]            @relation("ShipmentAgent")
+  chatMessages         ChatMessage[]         @relation("ChatSender")
   assignedLabOrders    LabOrder[]            @relation("LabOrderAgent")
 
   @@index([phoneNumber])
@@ -363,6 +379,7 @@ model Patient {
   fulfilments    PrescriptionFulfilment[]
   tipDeliveries  HealthTipDelivery[]
   addresses      Address[]
+  chatThreads    ChatThread[]
 }
 
 /// One saved delivery address.
@@ -399,7 +416,8 @@ model Address {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  orders MedicineOrder[]
+  orders    MedicineOrder[]
+  labOrders LabOrder[]
 
   @@index([patientId])
   @@index([pincode])
@@ -446,6 +464,19 @@ model Doctor {
   latitude        Float?
   longitude       Float?
 
+  /// Letterhead: the parts of a printed prescription the doctor owns.
+  ///
+  /// Only the header. The body — drugs, diagnosis, registration number, date —
+  /// is rendered by the platform from structured fields and cannot be edited
+  /// or removed, because those are what make the document valid under the
+  /// Telemedicine Practice Guidelines.
+  clinicName          String?
+  clinicPhone         String?
+  /// Documents rather than URLs: the bucket is private, so these are inlined
+  /// as data URIs at render time instead of being linked.
+  logoDocumentId      String?
+  signatureDocumentId String?
+
   /// Registration number issued by the NMC / State Medical Council. The
   /// Telemedicine Practice Guidelines require this on every prescription.
   councilRegistrationNumber String?
@@ -466,6 +497,7 @@ model Doctor {
   slots         DoctorSlot[]
   appointments  Appointment[]
   prescriptions Prescription[]
+  chatThreads   ChatThread[]
 
   @@index([specialty])
   @@index([isAvailable])
@@ -727,6 +759,15 @@ model Prescription {
   doctorRegistrationNumber String?
   consultationMode         AppointmentType @default(VIDEO)
   wasFollowUp              Boolean         @default(false)
+
+  /// Short code printed on the document, resolving to a public page that
+  /// confirms who issued it and when.
+  ///
+  /// Paper prescriptions are forged routinely and a pharmacist has no way to
+  /// check one. This makes the platform's version verifiable, which is also the
+  /// argument that gets a doctor to stop reaching for the pad. Nullable because
+  /// prescriptions issued before this existed have no code; new ones always do.
+  verificationCode String? @unique
 
   createdAt DateTime @default(now())
 
@@ -1024,6 +1065,14 @@ model LabPackage {
   sampleType  String
   fastingReq  Boolean  @default(false)
   description String?
+
+  /// Defaults to a plain report: the common case, and the one that promises
+  /// least. A test that produces films has to say so explicitly.
+  deliveryMode LabDeliveryMode @default(DIGITAL_REPORT)
+  /// Whether a phlebotomist can collect at the patient's address, as opposed to
+  /// the patient attending. An MRI cannot come to your house.
+  homeCollection Boolean @default(true)
+
   createdAt   DateTime @default(now())
 
   offerings  LabOffering[]
@@ -1094,9 +1143,23 @@ model LabOrder {
   testName     String
   price        Float
   status       LabOrderStatus @default(BOOKED)
+
+  /// Where the sample is collected from, or the report sent to. Snapshotted
+  /// like a medicine order's — an address-book entry can be edited afterwards
+  /// and a collection visit must record where it was actually sent.
   address      String?
   latitude     Float?
   longitude    Float?
+  addressId    String?
+  addressRef   Address? @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  pincode      String?
+
+  /// Copied from the package at booking time, so changing the catalogue later
+  /// cannot rewrite what an existing order promised.
+  deliveryMode LabDeliveryMode @default(DIGITAL_REPORT)
+  /// True when a phlebotomist is coming to the patient rather than the patient
+  /// attending the lab. Requires an address.
+  homeCollection Boolean @default(false)
 
   /// Legacy plain-URL field, retained only for rows created before reports
   /// moved into authorised Document storage. New reports use `documents`.
@@ -1127,6 +1190,76 @@ model LabOrder {
 // ---------------------------------------------------------------------------
 // Emergency
 // ---------------------------------------------------------------------------
+
+/// Follow-up messaging between a patient and a doctor they have actually seen.
+///
+/// Three things make this safe to offer.
+///
+/// It only exists after a completed consultation — a chat channel to a doctor
+/// who has never seen you is a consultation without a consultation, which is
+/// exactly what the Telemedicine Practice Guidelines exist to prevent.
+///
+/// It expires. An open channel forever after one paid consult is unlimited
+/// unpaid care; doctors disengage, and the ones who stay are the ones who stop
+/// reading it. A lapsed thread offers "start a follow-up" rather than a dead
+/// text box.
+///
+/// And the doctor controls it, with an admin override. The doctor carries the
+/// clinical responsibility for advice given here, so they must be able to close
+/// it; the admin needs a kill switch for harassment or for a doctor soliciting
+/// payment off-platform. Admin-only would put a non-clinician in the middle of
+/// a clinical judgement.
+model ChatThread {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId  String
+  doctor    Doctor  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  /// The consultation that earned the channel.
+  openedByAppointmentId String
+  openedAt              DateTime @default(now())
+
+  /// When it lapses. Extended by the doctor, never by the patient.
+  expiresAt DateTime
+
+  /// Closed early by the doctor. Distinct from expiry so the patient can be
+  /// told which happened.
+  closedAt DateTime?
+
+  /// Admin kill switch. Separate from `closedAt` because it must survive a
+  /// doctor reopening the thread.
+  blockedAt     DateTime?
+  blockedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages ChatMessage[]
+
+  /// One thread per pair. A second consultation extends the existing channel
+  /// rather than starting a parallel one nobody would think to look in.
+  @@unique([patientId, doctorId])
+  @@index([doctorId, expiresAt])
+}
+
+model ChatMessage {
+  id       String     @id @default(uuid())
+  threadId String
+  thread   ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  /// Who sent it. The user id rather than a role flag, so an audit can name the
+  /// account even after a role changes.
+  senderUserId String
+  sender       User   @relation("ChatSender", fields: [senderUserId], references: [id])
+
+  body   String
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([threadId, createdAt])
+}
 
 model EmergencySOS {
   id         String          @id @default(uuid())

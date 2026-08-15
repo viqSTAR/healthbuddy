@@ -33,7 +33,15 @@ router.post(
   validate({
     body: z.object({
       testId: uuidSchema,
+      /**
+       * A saved address is preferred: it is the only form carrying a pincode
+       * the platform has validated. Free text still works for a patient who
+       * has not saved one.
+       */
+      addressId: uuidSchema.optional(),
       address: z.string().trim().max(300).optional(),
+      /** Omitted means "infer from whether an address was given". */
+      homeCollection: z.boolean().optional(),
     }),
   }),
   bookLabTestHandler

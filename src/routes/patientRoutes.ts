@@ -4,6 +4,8 @@ import {
   getPatientProfileHandler,
   updatePatientProfileHandler,
   getMedicalRecordHandler,
+  listVisitsHandler,
+  getVisitHandler,
 } from '../controllers/patientController.js';
 import {
   listAddressesHandler,
@@ -58,6 +60,21 @@ router.put(
 );
 
 router.get('/me/records', getMedicalRecordHandler);
+
+/**
+ * Visits — the consultation and everything that came out of it.
+ *
+ * `/me/records` stays: it is the flat view some screens still read, and
+ * removing it would break them for no gain. This is the same data organised
+ * around the event rather than the table it lives in.
+ */
+router.get('/me/visits', listVisitsHandler);
+
+router.get(
+  '/me/visits/:id',
+  validate({ params: z.object({ id: uuidSchema }) }),
+  getVisitHandler
+);
 
 /* ---------- The address book ---------- */
 

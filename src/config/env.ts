@@ -58,6 +58,25 @@ const envSchema = z
     CORS_ORIGINS: z.string().optional().default(''),
 
     /**
+     * Where the platform is reachable from outside.
+     *
+     * Printed onto prescriptions as the address a pharmacist types to check the
+     * document is genuine, so it must be the public origin — not localhost —
+     * before any prescription is printed for real use.
+     */
+    PUBLIC_BASE_URL: z.string().url().default('http://localhost:5000'),
+
+    /**
+     * How long follow-up chat stays open after a consultation.
+     *
+     * Bounded on purpose. An open channel to a doctor forever after one paid
+     * consult is unlimited unpaid care, and the doctors who stay are the ones
+     * who stop reading it. Seven days maps onto the follow-up window the
+     * telemedicine rules already treat as a continuation of the same episode.
+     */
+    CHAT_WINDOW_DAYS: z.coerce.number().int().positive().max(90).default(7),
+
+    /**
      * File storage. "local" writes under UPLOAD_DIR and is fine for development;
      * production needs durable object storage, so it is rejected below.
      * "r2" and "s3" share one driver — R2 speaks the S3 API.

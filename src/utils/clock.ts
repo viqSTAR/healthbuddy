@@ -49,3 +49,22 @@ export const slotHasPassed = (date: string, startTime: string): boolean => {
   const now = platformNow();
   return date < now.date || (date === now.date && startTime <= now.time);
 };
+
+const toMinutes = (time: string) => {
+  const [h = '0', m = '0'] = time.split(':');
+  return Number(h) * 60 + Number(m);
+};
+
+/**
+ * Minutes from now until a slot starts — negative once it has begun.
+ *
+ * Whole days are converted through UTC midnights so the arithmetic is not
+ * thrown by a daylight-saving shift between the two dates. India does not
+ * observe one, but the calculation should not be the reason that stays true.
+ */
+export const minutesUntilSlot = (date: string, startTime: string): number => {
+  const now = platformNow();
+  const dayDelta =
+    (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${now.date}T00:00:00Z`)) / 60_000;
+  return dayDelta + toMinutes(startTime) - toMinutes(now.time);
+};
