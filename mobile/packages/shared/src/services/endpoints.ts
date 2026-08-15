@@ -1389,7 +1389,7 @@ export const fetchFulfilment = async (id: string) =>
 export const reorderPrescription = async (prescriptionId: string) =>
   (
     await api.post<{ fulfilment: Fulfilment }>(
-      `/fulfilments/prescription/${prescriptionId}/reorder`
+      `/fulfilment/prescription/${prescriptionId}/reorder`
     )
   ).data.fulfilment;
 

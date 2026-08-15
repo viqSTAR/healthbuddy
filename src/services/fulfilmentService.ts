@@ -642,8 +642,35 @@ export const requoteFulfilmentService = async (prescriptionId: string, patientId
     where: { prescriptionId },
     select: { id: true },
   });
+
   if (!fresh) {
-    throw new AppError('Nothing in this prescription can be ordered right now.', 409);
+    /**
+     * No basket could be built. "Nothing can be ordered" is true but useless —
+     * the patient tapped a button offering to order these very drugs, so they
+     * are owed the reason. The two causes need different actions from them: a
+     * drug we do not stock has to be bought at a chemist, while one that is out
+     * of stock nearby is worth trying again later.
+     */
+    const items = await prisma.prescribedMedicine.findMany({
+      where: { prescriptionId },
+      select: { name: true, medicineId: true },
+    });
+
+    const offCatalogue = items.filter((i) => !i.medicineId).map((i) => i.name);
+
+    if (offCatalogue.length === items.length && items.length > 0) {
+      throw new AppError(
+        `${offCatalogue.join(' and ')} ${offCatalogue.length === 1 ? 'is' : 'are'} not in our catalogue, so ${
+          offCatalogue.length === 1 ? 'it' : 'they'
+        } cannot be delivered. Any chemist can dispense this prescription.`,
+        409
+      );
+    }
+
+    throw new AppError(
+      'None of these medicines are in stock near you right now. Try again later, or order them from the store.',
+      409
+    );
   }
 
   return getFulfilmentService(fresh.id, patientId);
