@@ -19,10 +19,12 @@ import {
   useAsync,
   useAuth,
 } from '@healthbuddy/shared';
+import { useLocation } from '../../services/location';
 
 /** Mirrors `profile`: identity hero, stat row, grouped settings, sign-out. */
 export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { user, signOut } = useAuth();
+  const { selected } = useLocation();
   const profile = useAsync(() => fetchMyProfile(), []);
   const appointments = useAsync(() => fetchMyAppointments(), []);
 
@@ -91,8 +93,18 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
                 icon="location_on"
                 iconTint="warning"
                 title="Address"
-                subtitle={profile.data?.address ?? 'Not set'}
-                onPress={() => navigation.navigate('EditProfile')}
+                /*
+                 * The address book is the truth, not the legacy free-text field
+                 * on the patient row. This said "Not set" to people with a
+                 * default address saved and orders already delivered to it,
+                 * because it was reading the one place the app stopped writing.
+                 */
+                subtitle={
+                  selected
+                    ? [selected.line1, selected.city, selected.pincode].filter(Boolean).join(', ')
+                    : (profile.data?.address ?? 'Not set')
+                }
+                onPress={() => navigation.navigate('AddressBook')}
                 last
               />
             </Card>

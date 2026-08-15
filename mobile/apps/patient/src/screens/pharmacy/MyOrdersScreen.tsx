@@ -117,7 +117,14 @@ export const MyOrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                 ) : null}
 
                 <View style={styles.cardFoot}>
-                  <Text variant="captionSm" color={colors.captionGray} numberOfLines={1}>
+                  {/* The address gives up space, never the total. A long one
+                      used to squeeze the price until it read "₹212.0(". */}
+                  <Text
+                    variant="captionSm"
+                    color={colors.captionGray}
+                    numberOfLines={1}
+                    style={styles.footAddress}
+                  >
                     {order.address}
                   </Text>
                   <Text variant="bodyMd" weight="semibold" color={colors.primary}>
@@ -204,4 +211,5 @@ const styles = StyleSheet.create({
   },
   parcelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.base },
   cardFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.insetCard },
+  footAddress: { flex: 1 },
 });
