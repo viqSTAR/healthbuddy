@@ -301,5 +301,21 @@ export const endConsultationService = async (appointmentId: string, userId: stri
     entityId: appointmentId,
   });
 
+  /**
+   * Ending the consultation is what earns the follow-up channel, so it opens
+   * here rather than when the patient first goes looking for it.
+   *
+   * Imported lazily to keep the video and chat services from importing each
+   * other at module load. Failure is logged, not thrown: the consultation has
+   * genuinely ended, and losing the chat window must not make it look otherwise
+   * to the doctor who just closed it.
+   */
+  try {
+    const { openChatForAppointmentService } = await import('./chatService.js');
+    await openChatForAppointmentService(appointmentId);
+  } catch (err) {
+    logger.error(`[chat] could not open a thread for appointment ${appointmentId}`, err);
+  }
+
   return { appointmentId, status: 'COMPLETED' as const };
 };

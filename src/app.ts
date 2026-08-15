@@ -25,6 +25,7 @@ import fulfilmentRoutes from './routes/fulfilmentRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
 import { webhookHandler as paymentWebhookHandler } from './controllers/paymentController.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +92,7 @@ app.use('/api/v1/fulfilment', fulfilmentRoutes);
 app.use('/api/v1/health-content', healthRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/video', videoRoutes);
+app.use('/api/v1/chat', chatRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

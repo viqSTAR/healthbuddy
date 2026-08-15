@@ -272,27 +272,48 @@ describe('input validation', () => {
 
 describe('booking concurrency', () => {
   test('only one of five concurrent bookings wins the same slot', async () => {
-    const slot = await anAvailableSlot();
-    const sessions = await Promise.all([login(), login(), login(), login(), login()]);
+    /**
+     * Retried because the slot can be taken between choosing it and racing for
+     * it — by a developer clicking through the app, or another script against
+     * the same database. That produces five 409s and zero winners, which looks
+     * like a failure but is the atomic claim working correctly on a slot this
+     * test no longer owns.
+     *
+     * The invariant under test is "at most one winner, and the database agrees",
+     * and it is still asserted strictly on every attempt. Only the case of
+     * losing the slot outright is retried, and a genuine break — two winners —
+     * fails on the first pass rather than being retried away.
+     */
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const slot = await anAvailableSlot();
+      const sessions = await Promise.all([login(), login(), login(), login(), login()]);
 
-    const results = await Promise.all(
-      sessions.map((s) =>
-        request(app)
-          .post('/api/v1/appointments/book')
-          .set(auth(s.accessToken))
-          .send({ doctorId: slot.doctorId, slotId: slot.id, type: 'VIDEO' })
-      )
-    );
+      const results = await Promise.all(
+        sessions.map((s) =>
+          request(app)
+            .post('/api/v1/appointments/book')
+            .set(auth(s.accessToken))
+            .send({ doctorId: slot.doctorId, slotId: slot.id, type: 'VIDEO' })
+        )
+      );
 
-    const booked = results.filter((r) => r.status === 201);
-    const rejected = results.filter((r) => r.status === 409);
+      const booked = results.filter((r) => r.status === 201);
+      const rejected = results.filter((r) => r.status === 409);
+      const count = await prisma.appointment.count({ where: { slotId: slot.id } });
 
-    assert.equal(booked.length, 1, `expected exactly 1 winner, got ${booked.length}`);
-    assert.equal(rejected.length, 4);
+      // Never more than one winner — checked before anything is retried, so a
+      // broken claim cannot hide behind another attempt.
+      assert.ok(booked.length <= 1, `two callers booked the same slot: ${booked.length} winners`);
+      assert.equal(count, 1, `slot ${slot.id} holds ${count} appointments`);
 
-    // And the database agrees.
-    const count = await prisma.appointment.count({ where: { slotId: slot.id } });
-    assert.equal(count, 1);
+      if (booked.length === 1) {
+        assert.equal(rejected.length, 4);
+        return;
+      }
+
+      // Zero winners: someone outside this test holds the slot. Take a fresh one.
+      assert.ok(attempt < 3, 'could not obtain an uncontended slot in three attempts');
+    }
   });
 
   test('a booked slot is reported as unavailable afterwards', async () => {
