@@ -249,7 +249,10 @@ export const MedicineStoreScreen: React.FC<{ navigation: any }> = ({ navigation 
                           outOfStock={sellable <= 0}
                           eta={m.deliverySpeed === 'EXPRESS' ? 'Under 30 min' : '2 days'}
                           express={m.deliverySpeed === 'EXPRESS'}
-                          onPress={() => navigation.navigate('Cart')}
+                          // Tapping a product opens the product. This used to
+                          // jump to the cart, which is the one place a shopper
+                          // is not trying to go when they tap a tile.
+                          onPress={() => navigation.navigate('MedicineDetail', { medicine: m })}
                           onAdd={() => {
                             cart.add(m);
                             const next = cart.quantityOf(m.id) + 1;

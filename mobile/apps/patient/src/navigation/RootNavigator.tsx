@@ -38,10 +38,12 @@ import { MyOrdersScreen } from '../screens/pharmacy/MyOrdersScreen';
 import { OrderTrackingScreen } from '../screens/pharmacy/OrderTrackingScreen';
 import { PaymentScreen } from '../screens/pharmacy/PaymentScreen';
 import { OrderConfirmedScreen } from '../screens/pharmacy/OrderConfirmedScreen';
+import { MedicineDetailScreen } from '../screens/pharmacy/MedicineDetailScreen';
 
 // Labs
 import { LabTestScreen } from '../screens/labs/LabTestScreen';
 import { LabResultScreen } from '../screens/labs/LabResultScreen';
+import { LabTestDetailScreen } from '../screens/labs/LabTestDetailScreen';
 
 // Emergency
 import { EmergencySosScreen } from '../screens/emergency/EmergencySosScreen';
@@ -128,7 +130,9 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="Payment" component={PaymentScreen} />
             <Stack.Screen name="OrderConfirmed" component={OrderConfirmedScreen} />
             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
+            <Stack.Screen name="MedicineDetail" component={MedicineDetailScreen} />
             <Stack.Screen name="Labs" component={LabTestScreen} />
+            <Stack.Screen name="LabTestDetail" component={LabTestDetailScreen} />
             <Stack.Screen name="LabResult" component={LabResultScreen} />
             <Stack.Screen name="Emergency" component={EmergencySosScreen} />
             <Stack.Screen name="DoctorProfile" component={DoctorProfileScreen} />

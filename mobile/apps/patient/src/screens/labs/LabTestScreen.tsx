@@ -74,6 +74,29 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
       return;
     }
 
+    /**
+     * Confirm where before creating anything.
+     *
+     * The order carries its collection address from the moment it is created,
+     * so offering a change afterwards is offering something we cannot honour —
+     * the payment screen can only send them back to book again. Asking here
+     * costs one tap and means the address on the order is one the patient
+     * actually chose, rather than whichever happened to be their default.
+     */
+    if (pkg.homeCollection && selected) {
+      const where = [selected.line1, selected.city, selected.pincode].filter(Boolean).join(', ');
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert('Collect your sample here?', where, [
+          { text: 'Change address', onPress: () => resolve(false) },
+          { text: 'Collect here', onPress: () => resolve(true) },
+        ]);
+      });
+      if (!confirmed) {
+        navigation.navigate('AddressBook');
+        return;
+      }
+    }
+
     setBookingId(testId);
     try {
       const order = await bookLabTest({
@@ -153,7 +176,11 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
             <EmptyState icon="search_off" title="No tests found" message="Try another category." />
           ) : (
             packages.map((pkg) => (
-              <Card key={pkg.id} style={styles.testCard}>
+              <Card
+                key={pkg.id}
+                style={styles.testCard}
+                onPress={() => navigation.navigate('LabTestDetail', { pkg, onBook: () => book(pkg) })}
+              >
                 <View style={styles.testHead}>
                   <View style={styles.testIcon}>
                     <Icon name="biotech" size={22} color={colors.warningDark} />

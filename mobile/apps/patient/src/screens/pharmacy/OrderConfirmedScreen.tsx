@@ -65,7 +65,7 @@ const stepsFor = (
         body: `${params.testName ?? 'Your test'} is booked and the lab has it.`,
       },
       {
-        icon: 'home_health',
+        icon: 'home',
         title: 'Sample collection',
         body: `A phlebotomist will collect your sample ${where}. You'll get a call before they set out.`,
       },
