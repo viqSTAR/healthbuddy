@@ -33,31 +33,12 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
   brand = 'Health Buddy',
 }) => {
   const { pendingPhone, devOtp, verifyOtp, resendOtp, cancelOtp } = useAuth();
-  const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(RESEND_SECONDS);
 
-  const inputs = useRef<(TextInput | null)[]>([]);
-
-  /**
-   * A mirror of `digits` that is correct *now* rather than as of the last
-   * render.
-   *
-   * Each box fires its own onChangeText, and when they arrive faster than React
-   * re-renders — a fast typist, an SMS autofill delivering a digit at a time —
-   * every handler in that burst reads the same stale `digits` array and writes
-   * over the one before it. Six digits went in and two came out, which then
-   * auto-submitted as a wrong code and burned one of the five attempts the
-   * server allows. Building each update from the ref makes the writes additive
-   * regardless of when React catches up.
-   */
-  const digitsRef = useRef<string[]>(Array(OTP_LENGTH).fill(''));
-
-  const commit = useCallback((next: string[]) => {
-    digitsRef.current = next;
-    setDigits(next);
-  }, []);
+  const hiddenInput = useRef<TextInput | null>(null);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -80,9 +61,8 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
         // On success the navigator swaps to the authenticated stack.
       } catch (err) {
         setError(errorMessage(err, 'Verification failed.'));
-        digitsRef.current = Array(OTP_LENGTH).fill('');
-        setDigits(Array(OTP_LENGTH).fill(''));
-        inputs.current[0]?.focus();
+        setCode('');
+        hiddenInput.current?.focus();
       } finally {
         setLoading(false);
       }
@@ -90,48 +70,26 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
     [verifyOtp]
   );
 
-  const setDigit = (index: number, value: string) => {
-    const cleaned = value.replace(/\D/g, '');
-
-    // Handle a pasted or autofilled full code landing in one box.
-    if (cleaned.length > 1) {
-      const spread = cleaned.slice(0, OTP_LENGTH).split('');
-      const next = Array(OTP_LENGTH)
-        .fill('')
-        .map((_, i) => spread[i] ?? '');
-      commit(next);
-      inputs.current[Math.min(spread.length, OTP_LENGTH - 1)]?.focus();
-      if (spread.length === OTP_LENGTH) void submit(spread.join(''));
-      return;
-    }
-
-    const next = [...digitsRef.current];
-    next[index] = cleaned;
-    commit(next);
-    setError(null);
-
-    if (cleaned && index < OTP_LENGTH - 1) inputs.current[index + 1]?.focus();
-    // Only ever submit a full code. A burst that has not finished arriving
-    // must not be sent as a short one.
-    if (next.every((d) => d)) void submit(next.join(''));
-  };
-
-  const onKeyPress = (index: number, key: string) => {
-    if (key === 'Backspace' && !digitsRef.current[index] && index > 0) {
-      inputs.current[index - 1]?.focus();
-      const next = [...digitsRef.current];
-      next[index - 1] = '';
-      commit(next);
-    }
+  /**
+   * One handler, one value. Non-digits are stripped because a number pad can
+   * still emit them, and the code is capped rather than truncated silently
+   * mid-burst.
+   */
+  const onCodeChange = (value: string) => {
+    const cleaned = value.replace(/\D/g, '').slice(0, OTP_LENGTH);
+    setCode(cleaned);
+    if (cleaned) setError(null);
+    // Only ever submit a complete code.
+    if (cleaned.length === OTP_LENGTH) void submit(cleaned);
   };
 
   const resend = async () => {
     try {
       await resendOtp();
       setSecondsLeft(RESEND_SECONDS);
-      commit(Array(OTP_LENGTH).fill(''));
+      setCode('');
       setError(null);
-      inputs.current[0]?.focus();
+      hiddenInput.current?.focus();
     } catch (err) {
       setError(errorMessage(err, 'Could not resend the code.'));
     }
@@ -179,31 +137,52 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
             </View>
           ) : null}
 
-          <View style={styles.otpRow}>
-            {digits.map((digit, i) => (
-              <TextInput
+          {/*
+            One real input, six boxes that only draw it.
+
+            Six separate inputs with focus hopping between them cannot be made
+            reliable: `focus()` is asynchronous, so when digits arrive faster
+            than a frame — an SMS autofill, or anyone typing quickly — some land
+            in the box that still has focus and overwrite each other. Fixing the
+            state race alone was not enough; a six-digit burst still came out as
+            five, with a hole in the middle, because the race that remained was
+            the caret rather than the value.
+
+            The boxes are now presentation. There is one field, it holds the
+            whole code, and the row underneath renders its characters. Nothing
+            has to move, so nothing can arrive before the move finishes.
+          */}
+          <Pressable onPress={() => hiddenInput.current?.focus()} style={styles.otpRow}>
+            {Array.from({ length: OTP_LENGTH }).map((_, i) => (
+              <View
                 key={i}
-                ref={(el) => {
-                  inputs.current[i] = el;
-                }}
                 style={[
                   styles.otpBox,
-                  digit ? styles.otpBoxFilled : null,
+                  styles.otpBoxDisplay,
+                  code[i] ? styles.otpBoxFilled : null,
                   error ? styles.otpBoxError : null,
                 ]}
-                value={digit}
-                onChangeText={(v) => setDigit(i, v)}
-                onKeyPress={({ nativeEvent }) => onKeyPress(i, nativeEvent.key)}
-                keyboardType="number-pad"
-                maxLength={OTP_LENGTH}
-                textAlign="center"
-                autoFocus={i === 0}
-                accessibilityLabel={`Digit ${i + 1}`}
-                textContentType={i === 0 ? 'oneTimeCode' : 'none'}
-                autoComplete={i === 0 ? 'sms-otp' : 'off'}
-              />
+              >
+                <Text variant="displayBold" color={colors.headingDark}>
+                  {code[i] ?? ''}
+                </Text>
+              </View>
             ))}
-          </View>
+
+            <TextInput
+              ref={hiddenInput}
+              style={styles.hiddenInput}
+              value={code}
+              onChangeText={onCodeChange}
+              keyboardType="number-pad"
+              maxLength={OTP_LENGTH}
+              autoFocus
+              accessibilityLabel="Verification code"
+              textContentType="oneTimeCode"
+              autoComplete="sms-otp"
+              caretHidden
+            />
+          </Pressable>
 
           {error ? (
             <Text variant="captionSm" color={colors.error} center>
@@ -215,7 +194,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
             label="Verify"
             icon="check_circle"
             iconPosition="right"
-            onPress={() => submit(digits.join(''))}
+            onPress={() => void submit(code)}
             loading={loading}
             fullWidth
           />
@@ -292,6 +271,20 @@ const styles = StyleSheet.create({
     borderRadius: radius.base,
   },
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.base },
+  otpBoxDisplay: { alignItems: 'center', justifyContent: 'center' },
+  /**
+   * Covers the row and is invisible: tapping anywhere on the boxes focuses it,
+   * and the caret is hidden so the illusion holds.
+   */
+  hiddenInput: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0,
+    color: 'transparent',
+  },
   otpBox: {
     flex: 1,
     height: 56,
