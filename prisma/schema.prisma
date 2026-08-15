@@ -459,7 +459,7 @@ model Doctor {
   specialty       String
   qualification   String?
   experienceYears Int     @default(0)
-  consultationFee Float
+  consultationFee Decimal @db.Decimal(12, 2)
   rating          Float   @default(4.9)
   about           String?
   languages       String?
@@ -628,7 +628,7 @@ model ProviderApplication {
   qualification             String?
   specialty                 String?
   experienceYears           Int?
-  consultationFee           Float?
+  consultationFee           Decimal? @db.Decimal(12, 2)
 
   // Pharmacy-specific
   drugLicenceNumber   String?
@@ -834,9 +834,9 @@ model PrescriptionFulfilment {
   /// the patient is never charged a price different from the one they approved.
   medicineQuote Json?
   labQuote      Json?
-  medicineTotal Float @default(0)
-  labTotal      Float @default(0)
-  deliveryFee   Float @default(0)
+  medicineTotal Decimal @default(0) @db.Decimal(12, 2)
+  labTotal      Decimal @default(0) @db.Decimal(12, 2)
+  deliveryFee   Decimal @default(0) @db.Decimal(12, 2)
 
   consentedAt   DateTime?
   declinedAt    DateTime?
@@ -894,7 +894,7 @@ model Medicine {
   name         String
   category     String
   /// Reference MRP. The price actually charged comes from PharmacyInventory.
-  price        Float
+  price        Decimal @db.Decimal(12, 2)
   stock        Int     @default(100)
   description  String?
   composition  String?
@@ -925,7 +925,7 @@ model PharmacyInventory {
   pharmacy     Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
   medicineId   String
   medicine     Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
-  price        Float
+  price        Decimal @db.Decimal(12, 2)
   /// Physically on the shelf. Maintained by StockMovement — never edited
   /// directly, so every change has a reason attached to it.
   stock        Int      @default(0)
@@ -993,8 +993,8 @@ model MedicineOrder {
   pharmacyId  String?
   pharmacy    Pharmacy?   @relation(fields: [pharmacyId], references: [id])
   items       Json
-  totalAmount Float
-  deliveryFee Float       @default(0)
+  totalAmount Decimal @db.Decimal(12, 2)
+  deliveryFee Decimal       @default(0) @db.Decimal(12, 2)
   status      OrderStatus @default(PLACED)
   address     String
   latitude    Float?
@@ -1055,7 +1055,7 @@ model Shipment {
 
   /// The lines this shop is filling, same shape as `MedicineOrder.items`.
   items    Json
-  subtotal Float
+  subtotal Decimal @db.Decimal(12, 2)
 
   /// The slowest line decides the parcel: a box cannot arrive before the thing
   /// in it that takes longest.
@@ -1086,7 +1086,7 @@ model LabPackage {
   testName    String
   category    String
   /// National fallback, used when no LabTestPrice covers an area.
-  price       Float
+  price       Decimal @db.Decimal(12, 2)
   sampleType  String
   fastingReq  Boolean  @default(false)
   description String?
@@ -1126,8 +1126,8 @@ model LabTestPrice {
   state             String     @default("")
   /// "" means any city within `state`.
   city              String     @default("")
-  price             Float
-  homeCollectionFee Float      @default(0)
+  price             Decimal @db.Decimal(12, 2)
+  homeCollectionFee Decimal      @default(0) @db.Decimal(12, 2)
   isActive          Boolean    @default(true)
   note              String?
 
@@ -1166,7 +1166,7 @@ model LabOrder {
   labPartnerId String?
   labPartner   LabPartner?    @relation(fields: [labPartnerId], references: [id])
   testName     String
-  price        Float
+  price        Decimal @db.Decimal(12, 2)
   status       LabOrderStatus @default(BOOKED)
 
   /// Where the sample is collected from, or the report sent to. Snapshotted
@@ -1350,9 +1350,9 @@ model Payment {
   purpose     PaymentPurpose
   method      PaymentMethod  @default(UPI)
   /// What the payer is charged, inclusive of delivery and collection fees.
-  amount      Float
+  amount      Decimal @db.Decimal(12, 2)
   /// The platform's cut, already contained within `amount`.
-  platformFee Float          @default(0)
+  platformFee Decimal          @default(0) @db.Decimal(12, 2)
   currency    String         @default("INR")
   status      PaymentStatus  @default(PENDING)
 
@@ -1364,7 +1364,7 @@ model Payment {
   failureReason     String?
 
   paidAt         DateTime?
-  refundedAmount Float     @default(0)
+  refundedAmount Decimal     @default(0) @db.Decimal(12, 2)
   refundedAt     DateTime?
   refundReason   String?
   gatewayRefundId String?
@@ -1411,7 +1411,7 @@ model PaymentSplit {
   /// The payee's account at the aggregator, resolved when the split is built.
   /// Null means the partner has not finished payout onboarding yet.
   payoutAccountId String?
-  amount    Float
+  amount    Decimal @db.Decimal(12, 2)
   status    SplitStatus @default(PENDING)
   gatewayTransferId String?
   settledAt DateTime?

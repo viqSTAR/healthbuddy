@@ -5,6 +5,7 @@ import { AppError, notFound, conflict, forbidden } from '../utils/AppError.js';
 import { logger } from '../utils/logger.js';
 import { notify } from './notificationService.js';
 import { recordAudit } from './auditService.js';
+import { toNum, sum, dec } from '../utils/money.js';
 import {
   paymentProvider,
   toPaise,
@@ -184,13 +185,15 @@ const resolveMedicineOrder = async (orderId: string, patientId: string): Promise
   // the single pharmacy the row records.
   const payees =
     order.shipments.length > 0
-      ? order.shipments.map((s) => asPayee(s.pharmacy, s.subtotal))
-      : [asPayee(order.pharmacy, order.totalAmount)];
+      ? order.shipments.map((s) => asPayee(s.pharmacy, toNum(s.subtotal)))
+      : [asPayee(order.pharmacy, toNum(order.totalAmount))];
 
   return {
     purpose: 'MEDICINE_ORDER',
-    amount: Number((order.totalAmount + order.deliveryFee).toFixed(2)),
-    deliveryAmount: order.deliveryFee,
+    // Summed in Decimal, converted once — adding the floats first is the drift
+    // this migration exists to remove.
+    amount: toNum(sum([order.totalAmount, order.deliveryFee])),
+    deliveryAmount: toNum(order.deliveryFee),
     description: 'Medicine order',
     payees,
     link: { medicineOrderId: order.id } as Prisma.PaymentUncheckedCreateInput,
@@ -209,7 +212,7 @@ const resolveLabOrder = async (orderId: string, patientId: string): Promise<Char
 
   return {
     purpose: 'LAB_ORDER',
-    amount: order.price,
+    amount: toNum(order.price),
     deliveryAmount: 0,
     description: order.testName,
     payees: [
@@ -218,7 +221,7 @@ const resolveLabOrder = async (orderId: string, patientId: string): Promise<Char
         id: order.labPartner?.id ?? null,
         payoutAccountId: order.labPartner?.payoutAccountId ?? null,
         commissionPercent: order.labPartner?.commissionPercent ?? env.COMMISSION_LAB_PCT,
-        goodsAmount: order.price,
+        goodsAmount: toNum(order.price),
       },
     ],
     link: { labOrderId: order.id } as Prisma.PaymentUncheckedCreateInput,
@@ -264,36 +267,36 @@ const resolveFulfilment = async (
   }
 
   const payees: Payee[] = [];
-  let amount = 0;
-  let deliveryAmount = 0;
+  const amounts: (number | Prisma.Decimal)[] = [];
+  const deliveryAmounts: (number | Prisma.Decimal)[] = [];
 
   for (const order of live.medicines) {
-    amount += order.totalAmount + order.deliveryFee;
-    deliveryAmount += order.deliveryFee;
+    amounts.push(order.totalAmount, order.deliveryFee);
+    deliveryAmounts.push(order.deliveryFee);
     payees.push({
       type: 'PHARMACY',
       id: order.pharmacy?.id ?? null,
       payoutAccountId: order.pharmacy?.payoutAccountId ?? null,
       commissionPercent: order.pharmacy?.commissionPercent ?? env.COMMISSION_PHARMACY_PCT,
-      goodsAmount: order.totalAmount,
+      goodsAmount: toNum(order.totalAmount),
     });
   }
 
   for (const order of live.labs) {
-    amount += order.price;
+    amounts.push(order.price);
     payees.push({
       type: 'LAB',
       id: order.labPartner?.id ?? null,
       payoutAccountId: order.labPartner?.payoutAccountId ?? null,
       commissionPercent: order.labPartner?.commissionPercent ?? env.COMMISSION_LAB_PCT,
-      goodsAmount: order.price,
+      goodsAmount: toNum(order.price),
     });
   }
 
   return {
     purpose: 'PRESCRIPTION_BASKET',
-    amount: Number(amount.toFixed(2)),
-    deliveryAmount,
+    amount: toNum(sum(amounts)),
+    deliveryAmount: toNum(sum(deliveryAmounts)),
     description: 'Prescription order',
     payees,
     link: { fulfilmentId } as Prisma.PaymentUncheckedCreateInput,
@@ -323,7 +326,7 @@ const resolveAppointment = async (
 
   return {
     purpose: 'APPOINTMENT',
-    amount: appointment.doctor.consultationFee,
+    amount: toNum(appointment.doctor.consultationFee),
     deliveryAmount: 0,
     description: `Consultation with ${appointment.doctor.name}`,
     payees: [
@@ -332,7 +335,7 @@ const resolveAppointment = async (
         id: appointment.doctor.id,
         payoutAccountId: appointment.doctor.payoutAccountId,
         commissionPercent: appointment.doctor.commissionPercent ?? env.COMMISSION_DOCTOR_PCT,
-        goodsAmount: appointment.doctor.consultationFee,
+        goodsAmount: toNum(appointment.doctor.consultationFee),
       },
     ],
     link: { appointmentId: appointment.id } as Prisma.PaymentUncheckedCreateInput,
@@ -405,7 +408,7 @@ export const createCheckoutService = async (input: CheckoutInput): Promise<Check
       return {
         paymentId: existing.id,
         method: existing.method,
-        amount: existing.amount,
+        amount: toNum(existing.amount),
         currency: existing.currency,
         status: existing.status,
         gatewayOrderId: existing.gatewayOrderId,
@@ -845,18 +848,21 @@ export const refundForTargetService = async (
       where: { id: payment.id },
       data: { status: 'REFUNDED', refundedAt: new Date(), refundReason: reason.slice(0, 300) },
     });
-    return { refunded: true, amount: payment.amount };
+    return { refunded: true, amount: toNum(payment.amount) };
   }
 
   try {
-    const remaining = payment.amount - payment.refundedAmount;
-    if (remaining <= 0) return { refunded: false, amount: 0 };
+    const remaining = dec(payment.amount).sub(payment.refundedAmount);
+    if (remaining.lte(0)) return { refunded: false, amount: 0 };
 
     // Never return more than is still held, however the caller arrived at the
     // figure — a gateway would reject it, and a rounding slip must not become
     // a refund larger than the payment.
-    const outstanding = partial ? Math.min(partial.amount, remaining) : remaining;
-    if (outstanding <= 0) return { refunded: false, amount: 0 };
+    const outstandingDec = partial
+      ? (dec(partial.amount).lt(remaining) ? dec(partial.amount) : remaining)
+      : remaining;
+    if (outstandingDec.lte(0)) return { refunded: false, amount: 0 };
+    const outstanding = toNum(outstandingDec);
 
     const { refundId } = await paymentProvider.refund(
       payment.gatewayPaymentId!,
@@ -864,8 +870,14 @@ export const refundForTargetService = async (
       reason
     );
 
-    const refundedTotal = Number((payment.refundedAmount + outstanding).toFixed(2));
-    const fullyRefunded = refundedTotal >= payment.amount - 0.005;
+    const refundedTotal = dec(payment.refundedAmount).add(outstandingDec);
+    /**
+     * An exact comparison, at last. This used to read `>= amount - 0.005`,
+     * because summing floats meant a fully refunded payment could land a
+     * hair under its own total and never be marked REFUNDED. Decimal removes
+     * the need for the fudge factor rather than tuning it.
+     */
+    const fullyRefunded = refundedTotal.gte(payment.amount);
 
     await prisma.$transaction([
       prisma.payment.update({
@@ -964,15 +976,16 @@ export const markCodCollectedService = async (orderId: string, actorUserId: stri
  * Reads
  * ------------------------------------------------------------------ */
 
+/** The payer's view. Decimal columns become plain numbers on the way out. */
 const publicPayment = (row: {
   id: string;
   purpose: PaymentPurpose;
   method: PaymentMethod;
-  amount: number;
+  amount: Prisma.Decimal | number;
   currency: string;
   status: string;
   paidAt: Date | null;
-  refundedAmount: number;
+  refundedAmount: Prisma.Decimal | number;
   refundedAt: Date | null;
   createdAt: Date;
   medicineOrderId: string | null;
@@ -983,11 +996,11 @@ const publicPayment = (row: {
   id: row.id,
   purpose: row.purpose,
   method: row.method,
-  amount: row.amount,
+  amount: toNum(row.amount),
   currency: row.currency,
   status: row.status,
   paidAt: row.paidAt,
-  refundedAmount: row.refundedAmount,
+  refundedAmount: toNum(row.refundedAmount),
   refundedAt: row.refundedAt,
   createdAt: row.createdAt,
   medicineOrderId: row.medicineOrderId,

@@ -1,5 +1,6 @@
 import { Prisma, type DeliverySpeed, type OrderStatus } from '@prisma/client';
 import { prisma } from '../config/db.js';
+import { toNum, dec } from '../utils/money.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { refundForTargetService } from './paymentService.js';
@@ -263,13 +264,14 @@ export const placeMedicineOrderService = async (patientId: string, input: PlaceO
         throw conflict(`${med.name} was just taken by another order.`);
       }
 
-      const itemTotal = Number((offer.price * item.quantity).toFixed(2));
+      // Priced in Decimal, then carried as a number on the order line.
+      const itemTotal = toNum(dec(offer.price).mul(item.quantity));
       totalAmount += itemTotal;
 
       processedItems.push({
         medicineId: med.id,
         name: med.name,
-        price: offer.price,
+        price: toNum(offer.price),
         quantity: item.quantity,
         itemTotal,
         pharmacyId: offer.pharmacyId,

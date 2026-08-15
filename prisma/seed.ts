@@ -278,7 +278,7 @@ async function main() {
         create: {
           pharmacyId: pharmacy.id,
           medicineId: med.id,
-          price: Math.round(med.price * p.markup),
+          price: Math.round(Number(med.price) * p.markup),
           stock: med.stock,
           reorderLevel: 20,
         },
@@ -363,7 +363,7 @@ async function main() {
           labPackageId: pkg.id,
           state: band.state,
           city: band.city,
-          price: Math.round(pkg.price * band.factor),
+          price: Math.round(Number(pkg.price) * band.factor),
           homeCollectionFee: band.collection,
           note: band.city ? `${band.city} rate` : 'National standard rate',
         },

@@ -150,13 +150,20 @@ describe('an order splits into one shipment per pharmacy', () => {
     );
     assert.equal(lineCount, 2);
 
+    /**
+     * Compared in integer paise, which is the unit the settlement is actually
+     * computed in. Summing the rupee values as JS numbers reintroduces exactly
+     * the drift the Decimal columns removed — 251.99999999999997 is not 252.
+     */
+    const paise = (v: unknown) => Math.round(Number(v) * 100);
     const subtotals = order.shipments.reduce(
-      (sum: number, s: { subtotal: number }) => sum + s.subtotal,
+      (total: number, s: { subtotal: unknown }) => total + paise(s.subtotal),
       0
     );
-    assert.ok(
-      Math.abs(subtotals - order.totalAmount) < 0.01,
-      `parcels ${subtotals} must sum to order ${order.totalAmount}`
+    assert.equal(
+      subtotals,
+      paise(order.totalAmount),
+      `parcels ${subtotals}p must sum to order ${paise(order.totalAmount)}p`
     );
 
     // Each parcel belongs to a different shop.
@@ -308,22 +315,31 @@ describe('settlement follows the goods', () => {
 
     // Integer paise with the platform absorbing the remainder: the legs must sum
     // to exactly what was charged. Any gap is a defect, not rounding.
-    const legTotal = splits.reduce((sum, s) => sum + s.amount, 0);
+    const legPaise = splits.reduce(
+      (total: number, s: any) => total + Math.round(Number(s.amount) * 100),
+      0
+    );
     const payment = await prisma.payment.findUniqueOrThrow({
       where: { id: checkout.body.paymentId },
       select: { amount: true },
     });
-    assert.ok(
-      Math.abs(legTotal - payment.amount) < 0.01,
-      `legs ${legTotal} must equal charge ${payment.amount}`
+    // Exact, now that amounts are Decimal rather than binary floats. The
+    // comment above always claimed a gap was a defect; the assertion can
+    // finally say so instead of tolerating a penny.
+    assert.equal(
+      legPaise,
+      Math.round(Number(payment.amount) * 100),
+      `legs ${legPaise}p must equal charge ${Math.round(Number(payment.amount) * 100)}p`
     );
 
     // The bigger shipment must earn the bigger leg — a sanity check that the
     // legs were not simply assigned to the shops in the wrong order.
-    const byShop = new Map(pharmacyLegs.map((l) => [l.payeeId, l.amount]));
-    const sorted = (order.shipments as { pharmacyId: string; subtotal: number }[])
+    // Compared as numbers: Decimal instances do not order correctly under the
+    // built-in operators, so `>=` on them silently compares something else.
+    const byShop = new Map(pharmacyLegs.map((l) => [l.payeeId, Number(l.amount)]));
+    const sorted = (order.shipments as { pharmacyId: string; subtotal: unknown }[])
       .slice()
-      .sort((a, b) => b.subtotal - a.subtotal);
+      .sort((a, b) => Number(b.subtotal) - Number(a.subtotal));
     assert.ok(
       byShop.get(sorted[0]!.pharmacyId)! >= byShop.get(sorted[1]!.pharmacyId)!,
       'the shop that supplied more must be owed more'

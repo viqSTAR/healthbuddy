@@ -1,5 +1,6 @@
 import type { PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../config/db.js';
+import { toNum, sum } from '../utils/money.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { recordAudit } from './auditService.js';
@@ -95,7 +96,7 @@ const quoteMedicine = async (
   });
 
   if (!offer) return null;
-  return { price: offer.price, pharmacyId: offer.pharmacy.id, pharmacyName: offer.pharmacy.name };
+  return { price: toNum(offer.price), pharmacyId: offer.pharmacy.id, pharmacyName: offer.pharmacy.name };
 };
 
 /**
@@ -295,9 +296,9 @@ const publicFulfilment = (
   medicines: (row.medicineQuote ?? []) as unknown as MedicineQuoteLine[],
   labTests: (row.labQuote ?? []) as unknown as LabQuoteLine[],
   medicineTotal: row.medicineTotal,
-  labTotal: row.labTotal,
-  deliveryFee: row.deliveryFee,
-  grandTotal: Number((row.medicineTotal + row.labTotal + row.deliveryFee).toFixed(2)),
+  labTotal: toNum(row.labTotal),
+  deliveryFee: toNum(row.deliveryFee),
+  grandTotal: toNum(sum([row.medicineTotal, row.labTotal, row.deliveryFee])),
   expiresAt: row.expiresAt,
   consentedAt: row.consentedAt,
   declinedAt: row.declinedAt,

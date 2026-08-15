@@ -1,5 +1,6 @@
 import type { Prisma, Role } from '@prisma/client';
 import { prisma } from '../config/db.js';
+import { toNum, dec } from '../utils/money.js';
 import { AppError, notFound } from '../utils/AppError.js';
 import { recordAudit } from './auditService.js';
 
@@ -32,7 +33,8 @@ interface Page {
 
 const skipTake = ({ page, limit }: Page) => ({ skip: (page - 1) * limit, take: limit });
 
-const money = (n: number | null | undefined) => Number((n ?? 0).toFixed(2));
+/** Rounds for display, and accepts the Decimal that money columns now return. */
+const money = (n: Prisma.Decimal | number | null | undefined) => Number(toNum(n).toFixed(2));
 
 const startOfToday = () => {
   const d = new Date();
@@ -326,9 +328,11 @@ export const getPatientService = async (id: string) => {
     }),
   ]);
 
-  const lifetime = payments
-    .filter((p) => p.status === 'PAID')
-    .reduce((sum, p) => sum + p.amount - p.refundedAmount, 0);
+  const lifetime = toNum(
+    payments
+      .filter((p) => p.status === 'PAID')
+      .reduce((total, p) => total.add(p.amount).sub(p.refundedAmount), dec(0))
+  );
 
   return {
     patient,
@@ -1570,7 +1574,7 @@ export const getPaymentService = async (id: string) => {
 
   // The reconciliation line: legs must add up to the charge, and a gap is a bug
   // worth seeing rather than a rounding difference worth hiding.
-  const legTotal = payment.splits.reduce((sum, s) => sum + s.amount, 0);
+  const legTotal = payment.splits.reduce((total, s) => total.add(s.amount), dec(0));
 
   // Name each payee, so a split reads as "Apollo Pharmacy" not a bare uuid.
   const [pharmacies, labs, doctors] = await Promise.all([
@@ -1600,8 +1604,13 @@ export const getPaymentService = async (id: string) => {
     reconciliation: {
       charged: money(payment.amount),
       legTotal: money(legTotal),
-      difference: money(payment.amount - legTotal),
-      balanced: Math.abs(payment.amount - legTotal) < 0.01,
+      difference: money(dec(payment.amount).sub(legTotal)),
+      /**
+       * Exact. This compared floats within a penny, which meant a genuine
+       * one-paise shortfall in a settlement looked identical to a rounding
+       * artefact — and the whole point of this line is to catch the former.
+       */
+      balanced: dec(payment.amount).eq(legTotal),
     },
   };
 };

@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/db.js';
+import { toNum, dec } from '../utils/money.js';
 import { AppError, notFound } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 
@@ -84,9 +85,9 @@ export const upsertInventoryItemService = async (params: {
 
   // Selling above the printed MRP is an offence under the Drugs (Prices
   // Control) Order, so the catalogue MRP is a ceiling, not a suggestion.
-  if (params.price > medicine.price) {
+  if (dec(params.price).gt(medicine.price)) {
     throw new AppError(
-      `${medicine.name} cannot be listed above its MRP of ₹${medicine.price.toFixed(2)}.`,
+      `${medicine.name} cannot be listed above its MRP of ₹${toNum(medicine.price).toFixed(2)}.`,
       422
     );
   }
@@ -339,7 +340,7 @@ export const resolveTestPriceService = async (
 
   if (!chosen) {
     return {
-      price: pkg.price,
+      price: toNum(pkg.price),
       homeCollectionFee: 0,
       source: 'CATALOGUE',
       area: 'Standard rate',
@@ -347,8 +348,8 @@ export const resolveTestPriceService = async (
   }
 
   return {
-    price: chosen.price,
-    homeCollectionFee: chosen.homeCollectionFee,
+    price: toNum(chosen.price),
+    homeCollectionFee: toNum(chosen.homeCollectionFee),
     source: chosen === exact ? 'CITY' : chosen === stateWide ? 'STATE' : 'NATIONAL',
     area: chosen.city || chosen.state || 'All areas',
   };

@@ -1,5 +1,6 @@
 import type { OrderStatus } from '@prisma/client';
 import { prisma } from '../config/db.js';
+import { toNum } from '../utils/money.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { refundForTargetService } from './paymentService.js';
@@ -188,7 +189,7 @@ export const updateShipmentStatusService = async (
         : await refundForTargetService(
             target,
             cancelReason ?? 'Part of your order was cancelled by the pharmacy.',
-            { amount: shipment.subtotal, splitPayeeId: pharmacyId }
+            { amount: toNum(shipment.subtotal), splitPayeeId: pharmacyId }
           );
   }
 

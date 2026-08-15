@@ -1,6 +1,30 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { logger } from '../utils/logger.js';
 import { isProduction } from './env.js';
+
+/**
+ * Money leaves this server as a number, not a string.
+ *
+ * Money columns are `Decimal`, and Prisma's Decimal serialises itself to a
+ * *string* — so the moment the columns changed type, every price in every
+ * response quietly became `"112"` instead of `112`. Nothing failed loudly: the
+ * apps' `rupees()` helper checks `typeof === 'number'`, falls back to zero, and
+ * renders a catalogue where everything costs ₹0.00.
+ *
+ * Converting in each service only covers the reads someone remembered to
+ * convert; TypeScript cannot help, because a Prisma row typed with Decimal is
+ * exactly what those endpoints are declared to return. Doing it here means no
+ * endpoint can leak one, including ones written later.
+ *
+ * Safe on the value: two decimal places of rupees is far inside what a double
+ * holds exactly. The precision that matters is in storage and in arithmetic,
+ * and both stay in Decimal.
+ */
+(Prisma.Decimal.prototype as unknown as { toJSON: () => number }).toJSON = function (
+  this: Prisma.Decimal
+) {
+  return this.toNumber();
+};
 
 const basePrisma = new PrismaClient({
   log: ['warn', 'error'],
