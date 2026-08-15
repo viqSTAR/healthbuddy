@@ -6,6 +6,7 @@ import {
   getPatientPrescriptionsService,
   getPrescriptionByIdService,
   getPrescribableMedicinesService,
+  markPrescribedItemObtainedService,
   type MedicineLine,
   type LabTestLine,
 } from '../services/prescriptionService.js';
@@ -125,3 +126,23 @@ export const verifyPrescriptionHandler = asyncHandler(async (req: Request, res: 
   const result = await verifyPrescriptionService((req.params as { code: string }).code);
   res.status(200).json({ success: true, ...result });
 });
+
+/** Patient-only: close or reopen a prescribed line they sourced themselves. */
+export const markItemObtainedHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params as { id: string };
+    const { kind, obtained } = req.body as {
+      kind: 'MEDICINE' | 'LAB_TEST';
+      obtained: boolean;
+    };
+
+    const item = await markPrescribedItemObtainedService({
+      patientId: requirePatientId(req),
+      itemId: id,
+      kind,
+      obtained,
+    });
+
+    res.status(200).json({ success: true, item });
+  }
+);

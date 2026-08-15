@@ -7,6 +7,7 @@ import {
   getPrescribableMedicinesHandler,
   printPrescriptionHandler,
   verifyPrescriptionHandler,
+  markItemObtainedHandler,
 } from '../controllers/prescriptionController.js';
 import { authenticateJwt, authorizeRoles } from '../middlewares/auth.js';
 import { validate, uuidSchema } from '../middlewares/validate.js';
@@ -102,6 +103,25 @@ router.get(
   '/:id/print',
   validate({ params: z.object({ id: uuidSchema }) }),
   printPrescriptionHandler
+);
+
+/**
+ * A patient closing a line they sourced elsewhere.
+ *
+ * Patient-only by design: it is a statement about what they did, not a clinical
+ * edit, and the prescription itself stays exactly as the doctor wrote it.
+ */
+router.post(
+  '/items/:id/obtained',
+  authorizeRoles('PATIENT'),
+  validate({
+    params: z.object({ id: uuidSchema }),
+    body: z.object({
+      kind: z.enum(['MEDICINE', 'LAB_TEST']),
+      obtained: z.boolean().default(true),
+    }),
+  }),
+  markItemObtainedHandler
 );
 
 export default router;

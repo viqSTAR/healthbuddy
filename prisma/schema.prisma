@@ -804,6 +804,13 @@ model PrescribedLabTest {
   instructions   String?
   urgent         Boolean      @default(false)
 
+  /// Set when the patient tells us they got this themselves — from a local
+  /// chemist, or a lab they already had booked. It closes the item without
+  /// pretending we supplied it: the platform has no order, no payment and no
+  /// record of what was actually dispensed, and recording it as fulfilled
+  /// would claim all three. Null means still outstanding.
+  selfObtainedAt DateTime?
+
   @@index([prescriptionId])
   @@index([labPackageId])
 }
@@ -864,6 +871,13 @@ model PrescribedMedicine {
   frequency      String
   durationDays   Int?
   instructions   String?
+
+  /// Set when the patient tells us they got this themselves — from a local
+  /// chemist, or a lab they already had booked. It closes the item without
+  /// pretending we supplied it: the platform has no order, no payment and no
+  /// record of what was actually dispensed, and recording it as fulfilled
+  /// would claim all three. Null means still outstanding.
+  selfObtainedAt DateTime?
 
   @@index([prescriptionId])
   @@index([medicineId])

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Linking } from 'react-native';
+import { View, StyleSheet, Linking, Pressable } from 'react-native';
 import {
   Badge,
   Button,
@@ -18,11 +18,13 @@ import {
   fetchVisit,
   prescriptionPrintUrl,
   reorderPrescription,
+  markPrescribedItemObtained,
   radius,
   rupees,
   spacing,
   useAsync,
   type JoinState,
+  type VisitDetail,
 } from '@healthbuddy/shared';
 
 const formatDay = (date: string) =>
@@ -84,6 +86,16 @@ export const VisitDetailScreen: React.FC<{ navigation: any; route: any }> = ({
   }
 
   const rx = visit.prescription;
+
+  /**
+   * What the platform actually ended up supplying, so the section below can
+   * name what it did not. Medicines match on catalogue id; tests match on name,
+   * which is what a lab order carries.
+   */
+  const orderedMedicineIds = new Set(
+    visit.medicineOrders.flatMap((o) => (o.items ?? []).map((i) => i.medicineId))
+  );
+  const orderedTestNames = new Set(visit.labOrders.map((o) => o.testName.toLowerCase()));
   const canJoin = visit.type === 'VIDEO' && visit.status !== 'COMPLETED' && visit.status !== 'CANCELLED';
 
   return (
@@ -276,7 +288,40 @@ export const VisitDetailScreen: React.FC<{ navigation: any; route: any }> = ({
                   navigation.navigate('PrescriptionOrder', { fulfilmentId: rx.fulfilment!.id })
                 }
               />
-            ) : rx.fulfilment?.status === 'CONSENTED' ? null : rx.items.length > 0 ? (
+            ) : rx.fulfilment?.status === 'CONSENTED' ? (
+              /*
+               * Consenting to part of a basket used to close the subject. If a
+               * patient took the medicines and skipped the ₹919 test, the test
+               * simply vanished — no record that it was still outstanding, and
+               * no way to order it later short of asking the doctor again. A
+               * prescription is not finished because *something* was ordered.
+               */
+              <OutstandingItems
+                prescription={rx}
+                orderedMedicineIds={orderedMedicineIds}
+                orderedTestNames={orderedTestNames}
+                onOrder={async () => {
+                  setReordering(true);
+                  try {
+                    const fresh = await reorderPrescription(rx.id);
+                    navigation.navigate('PrescriptionOrder', { fulfilmentId: fresh.id });
+                  } catch (err) {
+                    Alert.alert('Could not price this prescription', errorMessage(err));
+                  } finally {
+                    setReordering(false);
+                  }
+                }}
+                onMarkObtained={async (itemId, kind) => {
+                  try {
+                    await markPrescribedItemObtained(itemId, kind);
+                    await reload();
+                  } catch (err) {
+                    Alert.alert('Could not update', errorMessage(err));
+                  }
+                }}
+                busy={reordering}
+              />
+            ) : rx.items.length > 0 ? (
               <Button
                 label="Order these medicines"
                 icon="shopping_cart"
@@ -416,4 +461,106 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     marginTop: 7,
   },
+});
+
+/**
+ * The lines of a prescription nobody has supplied.
+ *
+ * A prescription is a set of instructions, not a basket, and it is normal for
+ * only part of it to come through the platform: people pick the antibiotic up
+ * downstairs, or have the blood test done at the hospital they were already
+ * attending. What is not normal is for those lines to disappear the moment
+ * anything else is ordered, which is what happened before — the visit went
+ * quiet and the patient had no way back to them.
+ *
+ * Two ways to close a line, because there are two truths. "Order it" routes
+ * through the normal re-quote so prices are current. "I got this myself"
+ * records that the patient handled it, without claiming the platform supplied
+ * it — there is no order, no payment and no record of what was dispensed, and
+ * marking it fulfilled would put all three in a medical record falsely.
+ */
+const OutstandingItems: React.FC<{
+  prescription: NonNullable<VisitDetail['prescription']>;
+  orderedMedicineIds: Set<string | null>;
+  orderedTestNames: Set<string>;
+  onOrder: () => void;
+  onMarkObtained: (itemId: string, kind: 'MEDICINE' | 'LAB_TEST') => void;
+  busy: boolean;
+}> = ({ prescription, orderedMedicineIds, orderedTestNames, onOrder, onMarkObtained, busy }) => {
+  const medicines = prescription.items.filter(
+    (m) => !m.selfObtainedAt && !orderedMedicineIds.has(m.medicineId)
+  );
+  const tests = prescription.labTests.filter(
+    (t) => !t.selfObtainedAt && !orderedTestNames.has(t.testName.toLowerCase())
+  );
+
+  if (medicines.length === 0 && tests.length === 0) return null;
+
+  const orderable = medicines.some((m) => m.medicineId) || tests.some((t) => t.labPackageId);
+
+  return (
+    <View style={outstandingStyles.wrap}>
+      <View style={outstandingStyles.head}>
+        <Icon name="pending_actions" size={18} color={colors.warningDark} />
+        <Text variant="bodyMd" weight="semibold" color={colors.headingDark}>
+          Still to get ({medicines.length + tests.length})
+        </Text>
+      </View>
+
+      {[
+        ...medicines.map((m) => ({ id: m.id, kind: 'MEDICINE' as const, label: m.name, sub: `${m.dosage} · ${m.frequency}` })),
+        ...tests.map((t) => ({ id: t.id, kind: 'LAB_TEST' as const, label: t.testName, sub: t.urgent ? 'Marked urgent' : 'Lab test' })),
+      ].map((row) => (
+        <View key={row.id} style={outstandingStyles.row}>
+          <View style={outstandingStyles.flex}>
+            <Text variant="bodyMd" color={colors.headingDark}>
+              {row.label}
+            </Text>
+            <Text variant="captionSm" color={colors.captionGray}>
+              {row.sub}
+            </Text>
+          </View>
+          <Pressable onPress={() => onMarkObtained(row.id, row.kind)} hitSlop={8}>
+            <Text variant="captionSm" weight="semibold" color={colors.primary}>
+              I got this
+            </Text>
+          </Pressable>
+        </View>
+      ))}
+
+      {/*
+        Free-text lines have no catalogue entry, so they cannot be priced or
+        delivered — offering to order them would be offering something that
+        always fails.
+      */}
+      {orderable ? (
+        <Button
+          label="Order what's left"
+          icon="shopping_cart"
+          variant="secondary"
+          loading={busy}
+          onPress={onOrder}
+        />
+      ) : (
+        <Text variant="captionSm" color={colors.captionGray}>
+          These were written by name rather than from the catalogue, so they have to be bought at a
+          chemist. Mark them off once you have them.
+        </Text>
+      )}
+    </View>
+  );
+};
+
+const outstandingStyles = StyleSheet.create({
+  wrap: { gap: spacing.insetCard, marginTop: spacing.insetCard },
+  head: { flexDirection: 'row', alignItems: 'center', gap: spacing.base },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.insetCard,
+    paddingVertical: spacing.base,
+    borderTopWidth: 1,
+    borderTopColor: colors.outlineVariant,
+  },
+  flex: { flex: 1 },
 });

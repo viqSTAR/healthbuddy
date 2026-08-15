@@ -173,6 +173,7 @@ export const getVisitService = async (patientId: string, appointmentId: string) 
               frequency: true,
               durationDays: true,
               instructions: true,
+              selfObtainedAt: true,
             },
           },
           labTests: {
@@ -182,6 +183,7 @@ export const getVisitService = async (patientId: string, appointmentId: string) 
               testName: true,
               instructions: true,
               urgent: true,
+              selfObtainedAt: true,
             },
           },
           fulfilment: {
@@ -195,6 +197,9 @@ export const getVisitService = async (patientId: string, appointmentId: string) 
                   status: true,
                   totalAmount: true,
                   createdAt: true,
+                  // So the visit can tell which prescribed drugs were actually
+                  // ordered and which are still outstanding.
+                  items: true,
                   shipments: {
                     select: {
                       id: true,

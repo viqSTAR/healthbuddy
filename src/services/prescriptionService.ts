@@ -297,3 +297,55 @@ export const getPrescriptionByIdService = async (
   if (!isOwner) throw notFound('Prescription');
   return prescription;
 };
+
+/**
+ * The patient tells us they got an item themselves.
+ *
+ * A prescription routinely outruns the platform: someone picks the antibiotic
+ * up from the chemist downstairs, or has the blood test done at a hospital they
+ * were already attending. Without a way to say so, those lines sit on the visit
+ * as outstanding forever and the only way to clear them is to buy them twice.
+ *
+ * Deliberately not recorded as fulfilled. There is no order, no payment and no
+ * record of what was actually dispensed, so claiming the platform supplied it
+ * would put a falsehood in a medical record. It marks who closed it and when,
+ * and nothing more.
+ *
+ * Reversible, because people tap the wrong row.
+ */
+export const markPrescribedItemObtainedService = async (params: {
+  patientId: string;
+  itemId: string;
+  kind: 'MEDICINE' | 'LAB_TEST';
+  obtained: boolean;
+}) => {
+  const { patientId, itemId, kind, obtained } = params;
+  const at = obtained ? new Date() : null;
+
+  if (kind === 'MEDICINE') {
+    const item = await prisma.prescribedMedicine.findUnique({
+      where: { id: itemId },
+      select: { id: true, prescription: { select: { patientId: true } } },
+    });
+    // 404 rather than 403 so item ids cannot be probed across patients.
+    if (!item || item.prescription.patientId !== patientId) throw notFound('Prescribed medicine');
+
+    return prisma.prescribedMedicine.update({
+      where: { id: itemId },
+      data: { selfObtainedAt: at },
+      select: { id: true, name: true, selfObtainedAt: true },
+    });
+  }
+
+  const test = await prisma.prescribedLabTest.findUnique({
+    where: { id: itemId },
+    select: { id: true, prescription: { select: { patientId: true } } },
+  });
+  if (!test || test.prescription.patientId !== patientId) throw notFound('Prescribed test');
+
+  return prisma.prescribedLabTest.update({
+    where: { id: itemId },
+    data: { selfObtainedAt: at },
+    select: { id: true, testName: true, selfObtainedAt: true },
+  });
+};

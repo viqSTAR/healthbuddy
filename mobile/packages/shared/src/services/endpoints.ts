@@ -361,6 +361,8 @@ export interface PrescriptionItem {
   frequency: string;
   durationDays: number | null;
   instructions: string | null;
+  /** Set when the patient says they sourced this themselves, off-platform. */
+  selfObtainedAt?: string | null;
 }
 
 export interface Prescription {
@@ -925,6 +927,24 @@ export const fetchLabOffers = async (labPackageId: string) =>
 export const fetchLabPackages = async (params?: { category?: string }) =>
   (await api.get<{ packages: LabPackage[]; total: number }>('/labs/packages', { params })).data;
 
+/**
+ * Close (or reopen) a prescribed line the patient sourced themselves.
+ *
+ * Not the same as fulfilling it: the platform has no order and no record of
+ * what was dispensed, so this only records that the patient says it is handled.
+ */
+export const markPrescribedItemObtained = async (
+  itemId: string,
+  kind: 'MEDICINE' | 'LAB_TEST',
+  obtained = true
+) =>
+  (
+    await api.post<{ item: { id: string; selfObtainedAt: string | null } }>(
+      `/prescriptions/items/${itemId}/obtained`,
+      { kind, obtained }
+    )
+  ).data.item;
+
 export const bookLabTest = async (payload: {
   testId: string;
   /** Prefer a saved address — it is the only form carrying a known pincode. */
@@ -1016,6 +1036,8 @@ export interface VisitDetail extends Omit<VisitSummary, 'prescription' | 'counts
       frequency: string;
       durationDays: number | null;
       instructions: string | null;
+      /** Set when the patient says they sourced it themselves. */
+      selfObtainedAt?: string | null;
     }[];
     labTests: {
       id: string;
@@ -1023,12 +1045,14 @@ export interface VisitDetail extends Omit<VisitSummary, 'prescription' | 'counts
       testName: string;
       instructions: string | null;
       urgent: boolean;
+      selfObtainedAt?: string | null;
     }[];
     fulfilment: { id: string; status: string; expiresAt: string } | null;
   }) | null;
   medicineOrders: {
     id: string;
     status: OrderStatus;
+    items?: OrderItem[];
     totalAmount: number;
     createdAt: string;
     shipments: {
