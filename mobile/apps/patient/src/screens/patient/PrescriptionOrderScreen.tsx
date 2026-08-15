@@ -117,7 +117,19 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
     });
 
   const approve = async () => {
-    if (address.trim().length < 5) {
+    /**
+     * Either source of an address will do, which is what the request below
+     * already assumed: it sends the saved address by id and only falls back to
+     * the typed text when there is none.
+     *
+     * This guard checked the typed box alone. The box is not even rendered
+     * while a saved address is selected, so it was always empty in exactly the
+     * case the request handles best — a patient with a saved address, which is
+     * everyone after their first order, could not approve a prescription at
+     * all. It refused on the one screen where the address was displayed
+     * correctly right above the button.
+     */
+    if (!selected && address.trim().length < 5) {
       Alert.alert('Address needed', 'Enter where this should be delivered.');
       return;
     }
