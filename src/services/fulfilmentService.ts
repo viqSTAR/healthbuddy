@@ -527,35 +527,49 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
        * and the pharmacy can cancel it with a reason, which is better than
        * discarding a consent the patient already gave.
        */
-      for (const [shipmentPharmacyId, lines] of byPharmacy) {
-        const held = await reserveStockForOrder(
-          shipmentPharmacyId,
-          lines.map((m) => ({ medicineId: m.medicineId, quantity: m.quantity }))
-        );
-        if (!held.reserved) {
-          logger.warn(
-            `[fulfilment] could not reserve stock for order ${order.id} at pharmacy ${shipmentPharmacyId}: ${held.shortfall}`
+      await Promise.all(
+        [...byPharmacy.entries()].map(async ([shipmentPharmacyId, lines]) => {
+          const held = await reserveStockForOrder(
+            shipmentPharmacyId,
+            lines.map((m) => ({ medicineId: m.medicineId, quantity: m.quantity }))
           );
-        }
-      }
+          if (!held.reserved) {
+            logger.warn(
+              `[fulfilment] could not reserve stock for order ${order.id} at pharmacy ${shipmentPharmacyId}: ${held.shortfall}`
+            );
+          }
+        })
+      );
     }
 
-    for (const test of chosenTests) {
-      const labOrder = await prisma.labOrder.create({
-        data: {
-          patientId: input.patientId,
-          labPartnerId: test.labPartnerId,
-          testName: test.testName,
-          price: (test.price ?? 0) + test.homeCollectionFee,
-          address: deliveryAddress,
-          latitude: input.latitude ?? null,
-          longitude: input.longitude ?? null,
-          status: 'PENDING_PAYMENT',
-          fulfilmentId: fulfilment.id,
-        },
-      });
-      created.labOrderIds.push(labOrder.id);
-    }
+    /**
+     * The bookings do not depend on each other, so they go out together.
+     *
+     * Awaiting them one at a time costs a full round trip per test to a managed
+     * database that is often a long way off, and this endpoint is already the
+     * slowest thing a patient waits on — it creates the order, splits it,
+     * reserves stock at each shop, books the tests and opens a payment. That
+     * latency is what pushed the whole call past the app's request timeout, so
+     * a completed order came back to the patient as a failure.
+     */
+    const labOrders = await Promise.all(
+      chosenTests.map((test) =>
+        prisma.labOrder.create({
+          data: {
+            patientId: input.patientId,
+            labPartnerId: test.labPartnerId,
+            testName: test.testName,
+            price: (test.price ?? 0) + test.homeCollectionFee,
+            address: deliveryAddress,
+            latitude: input.latitude ?? null,
+            longitude: input.longitude ?? null,
+            status: 'PENDING_PAYMENT',
+            fulfilmentId: fulfilment.id,
+          },
+        })
+      )
+    );
+    created.labOrderIds.push(...labOrders.map((o) => o.id));
   } catch (err) {
     // Never strand a fulfilment as consented with no orders behind it.
     await prisma.prescriptionFulfilment

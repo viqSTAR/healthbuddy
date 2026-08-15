@@ -17,6 +17,8 @@ const PINCODE = /^[1-9][0-9]{5}$/;
 const addressView = {
   id: true,
   label: true,
+  receiverName: true,
+  receiverPhone: true,
   line1: true,
   line2: true,
   city: true,
@@ -41,6 +43,8 @@ export const listAddressesService = (patientId: string) =>
 
 export interface AddressInput {
   label?: AddressLabel;
+  receiverName?: string | null;
+  receiverPhone?: string | null;
   line1: string;
   line2?: string | null;
   city?: string | null;
@@ -71,8 +75,31 @@ const clearOtherDefaults = async (
   });
 };
 
+/**
+ * Who to put on a new address when the patient did not say.
+ *
+ * Almost every address belongs to the account holder, so asking for a name and
+ * number that the platform already knows is friction for the common case. They
+ * are still stored per-address rather than read from the account at delivery
+ * time: once someone edits them for their parent's flat, that edit has to
+ * survive, and it must not rewrite the account holder's own details.
+ */
+const accountHolder = async (patientId: string) => {
+  const patient = await prisma.patient.findUnique({
+    where: { id: patientId },
+    select: { fullName: true, user: { select: { phoneNumber: true } } },
+  });
+  return {
+    name: patient?.fullName?.trim() || null,
+    phone: patient?.user.phoneNumber ?? null,
+  };
+};
+
 export const createAddressService = async (patientId: string, input: AddressInput) => {
-  const existing = await prisma.address.count({ where: { patientId } });
+  const [existing, holder] = await Promise.all([
+    prisma.address.count({ where: { patientId } }),
+    accountHolder(patientId),
+  ]);
 
   // The first address a patient saves is their default whether they asked or
   // not; an address book where nothing is selected has no useful state.
@@ -85,6 +112,8 @@ export const createAddressService = async (patientId: string, input: AddressInpu
       data: {
         patientId,
         label: input.label ?? 'HOME',
+        receiverName: input.receiverName?.trim() || holder.name,
+        receiverPhone: input.receiverPhone?.trim() || holder.phone,
         line1: input.line1,
         line2: input.line2 ?? null,
         city: input.city ?? null,

@@ -19,6 +19,7 @@ import {
   validate,
   latitudeSchema,
   longitudeSchema,
+  phoneSchema,
   uuidSchema,
 } from '../middlewares/validate.js';
 
@@ -90,6 +91,9 @@ const pincodeSchema = z
 
 const addressBody = z.object({
   label: z.enum(['HOME', 'WORK', 'OTHER']).optional(),
+  // Omitted means "the account holder" — the service fills them in.
+  receiverName: z.string().trim().min(2, 'Enter the name.').max(120).nullable().optional(),
+  receiverPhone: phoneSchema.nullable().optional(),
   line1: z.string().trim().min(3, 'Enter the house and street.').max(200),
   line2: z.string().trim().max(200).nullable().optional(),
   city: z.string().trim().max(80).nullable().optional(),

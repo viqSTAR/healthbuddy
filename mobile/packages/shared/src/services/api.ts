@@ -62,9 +62,25 @@ const resolveBaseUrl = (): string => {
 
 export const API_BASE_URL = resolveBaseUrl();
 
+/**
+ * Long enough for a write that touches several tables.
+ *
+ * Placing an order is not one query: it creates the order, splits it into a
+ * shipment per pharmacy, reserves stock on each shelf, books the lab tests and
+ * opens a payment — each a round trip to a managed database that may be an
+ * ocean away, and which reconnects from cold after idling. Fifteen seconds was
+ * comfortably under that, so a perfectly good order came back as "cannot reach
+ * the server" while the server was busy completing it.
+ *
+ * Timing out a write is the worst kind of failure: the client cannot tell a
+ * request that never arrived from one that succeeded after it stopped
+ * listening. The cheap half of the fix is to wait long enough that it rarely
+ * happens; the other half is `errorMessage` below, which stops claiming failure
+ * when it does not know.
+ */
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 45000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -137,6 +153,21 @@ export const errorMessage = (err: unknown, fallback = 'Something went wrong.'): 
 
   if (data?.details?.length) return data.details[0]!.message;
   if (data?.error) return data.error;
+
+  /**
+   * A timeout is not a failure — it is an unknown.
+   *
+   * The request left the device and no answer came back in time, which means
+   * the server may well have completed it. Saying "could not place the order"
+   * is a claim we cannot support, and it is the dangerous direction to be wrong
+   * in: a patient told their order failed will place it again, and the first
+   * one is already on its way. Point them at the place that holds the truth
+   * instead.
+   */
+  if (axiosErr?.code === 'ECONNABORTED' || /timeout/i.test(axiosErr?.message ?? '')) {
+    return 'This is taking longer than usual, so we lost track of it. Check your orders before trying again — it may already have gone through.';
+  }
+
   if (axiosErr?.message === 'Network Error') {
     return `Cannot reach the server at ${API_BASE_URL}. Is the backend running?`;
   }

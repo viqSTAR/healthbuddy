@@ -395,6 +395,17 @@ model Address {
   patient   Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
   label     AddressLabel @default(HOME)
 
+  /// Who is receiving at this address, and on what number.
+  ///
+  /// Defaulted to the account holder when the address is saved, because that is
+  /// who it usually is, but kept per-address and editable: people order to a
+  /// parent's flat or a friend's office, and the rider needs to call whoever is
+  /// actually there rather than the person who happened to place the order.
+  /// Null on rows saved before this existed — read through `receiverFor()`,
+  /// which falls back to the account holder.
+  receiverName  String?
+  receiverPhone String?
+
   /// Free-text house/flat and street, as the patient typed or the map returned.
   line1     String
   line2     String?

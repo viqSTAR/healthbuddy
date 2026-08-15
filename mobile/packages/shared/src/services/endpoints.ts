@@ -602,6 +602,14 @@ export type AddressLabel = 'HOME' | 'WORK' | 'OTHER';
 export interface Address {
   id: string;
   label: AddressLabel;
+  /**
+   * Who is receiving here, and on what number. Defaulted to the account holder
+   * when the address was saved, so these are populated even though the form
+   * never forced anyone to type them. Null only on addresses saved before the
+   * fields existed.
+   */
+  receiverName: string | null;
+  receiverPhone: string | null;
   line1: string;
   line2: string | null;
   city: string | null;
@@ -617,6 +625,9 @@ export interface Address {
 
 export interface AddressDraft {
   label?: AddressLabel;
+  /** Omit to let the server use the account holder's own name and number. */
+  receiverName?: string | null;
+  receiverPhone?: string | null;
   line1: string;
   line2?: string | null;
   city?: string | null;
