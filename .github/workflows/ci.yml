@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The three typecheck gates that already existed locally and had nothing
+  # running them automatically.
+  #
+  # The test suite is deliberately not here: it runs against a real PostgreSQL
+  # and Redis rather than fakes, so it needs a live DATABASE_URL. Wiring it in
+  # means either a service container plus `prisma db push` and a seed, or a
+  # dedicated CI database — worth doing, but it is a separate change and a
+  # half-configured test job that always fails is worse than no test job.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Backend
+        run: |
+          npm ci
+          npx prisma generate
+          npm run typecheck
+
+      - name: Admin panel
+        working-directory: admin
+        run: |
+          npm ci
+          npm run typecheck
+
+      - name: Mobile apps
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run typecheck
