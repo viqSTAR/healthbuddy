@@ -36,7 +36,33 @@ const app = express();
 // client collapses into one rate-limit bucket.
 app.set('trust proxy', isProduction ? 1 : false);
 
+/**
+ * helmet's own CSP is left off and the policy set explicitly below, because this
+ * process serves two things with opposite needs: JSON and user-uploaded files,
+ * which must never execute anything, and one hand-written landing page that
+ * pulls Tailwind and Google Fonts from CDNs. A single policy either breaks the
+ * page or is too weak to be worth setting. Everything else helmet does —
+ * nosniff, frameguard, HSTS — still applies.
+ */
 app.use(helmet({ contentSecurityPolicy: false }));
+
+/**
+ * The default: nothing loads, nothing runs.
+ *
+ * This is the policy that covers document downloads. A lab report or a licence
+ * is attacker-supplied bytes served back under a MIME type the uploader chose,
+ * so the response that carries it should have no ability to fetch or execute
+ * anything. `img-src`/`media-src` stay on 'self' so a report opened directly in
+ * a browser tab still renders.
+ */
+const API_CSP =
+  "default-src 'none'; img-src 'self' data: blob:; media-src 'self'; " +
+  "object-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+
+app.use((_req, res, next) => {
+  res.setHeader('Content-Security-Policy', API_CSP);
+  next();
+});
 
 app.use(
   cors({
@@ -63,7 +89,25 @@ app.post(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-app.use(express.static(path.join(__dirname, '../public')));
+/**
+ * The landing page overrides the strict default with a policy it can actually
+ * run under. It is a static marketing page with no session and no patient data,
+ * so the CDN allowances cost nothing that matters; 'unsafe-eval' is there
+ * because the Tailwind Play CDN compiles classes in the browser.
+ */
+const PAGE_CSP =
+  "default-src 'self'; " +
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; " +
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src 'self' data: https://fonts.gstatic.com; " +
+  "img-src 'self' data: https:; connect-src 'self'; " +
+  "object-src 'none'; frame-ancestors 'none'; base-uri 'self'";
+
+app.use(
+  express.static(path.join(__dirname, '../public'), {
+    setHeaders: (res) => res.setHeader('Content-Security-Policy', PAGE_CSP),
+  })
+);
 
 app.use(globalApiRateLimiter);
 
