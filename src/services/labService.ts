@@ -93,7 +93,18 @@ export const bookLabTestService = async (patientId: string, input: BookLabTestIn
       patientId,
       testName: pkg.testName,
       price: pkg.price,
-      status: 'BOOKED',
+      /**
+       * Held until paid, exactly like a medicine order.
+       *
+       * This was created as BOOKED, which put it straight into the lab
+       * partner's queue: the sample was collected, the test run and the report
+       * issued with nothing ever charged. The same test ordered off a
+       * prescription was correctly held — only this direct path gave the work
+       * away. `releaseForFulfilment` in paymentService already knows how to
+       * promote a lab order out of PENDING_PAYMENT once the money lands, so
+       * this is the status it was always expecting to find.
+       */
+      status: 'PENDING_PAYMENT',
       deliveryMode: pkg.deliveryMode,
       homeCollection: wantsHomeCollection,
       address: addressText ?? 'Visit the lab',

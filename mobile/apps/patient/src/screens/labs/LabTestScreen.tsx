@@ -80,16 +80,23 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
         testId,
         ...(pkg.homeCollection && selected ? { addressId: selected.id, homeCollection: true } : { homeCollection: false }),
       });
-      Alert.alert(
-        'Test booked',
-        pkg.homeCollection
-          ? `${pkg.testName} is scheduled. We'll collect your sample from ${selected?.line1 ?? 'your address'}.`
-          : `${pkg.testName} is booked. Please visit the lab — this test cannot be collected at home.`,
-        [
-          { text: 'View order', onPress: () => navigation.navigate('LabResult', { orderId: order.id }) },
-          { text: 'OK' },
-        ]
-      );
+      /**
+       * A booking is not a payment. The order is created waiting on money and
+       * does not reach the lab until it arrives, so the patient continues to
+       * the same payment screen a medicine order uses.
+       *
+       * COD is refused: nothing is handed over at a door for a lab test, so
+       * there is no moment at which cash could be collected — the server
+       * refuses it for this purpose too.
+       */
+      navigation.navigate('Payment', {
+        purpose: 'LAB_ORDER',
+        targetId: order.id,
+        amount: pkg.price,
+        nextScreen: 'LabResult',
+        nextParams: { orderId: order.id },
+        allowCod: false,
+      });
     } catch (err) {
       Alert.alert('Could not book', errorMessage(err));
     } finally {

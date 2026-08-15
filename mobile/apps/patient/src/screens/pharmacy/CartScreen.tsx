@@ -57,7 +57,21 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         addressId: selected.id,
       });
       cart.clear();
-      navigation.replace('OrderTracking', { orderId: order.id });
+      /**
+       * Placing the order is not paying for it. The order is created holding
+       * stock and waiting on money, so the patient goes straight to the payment
+       * screen rather than to tracking — landing on a tracking page for
+       * something nobody has paid for is how an order sits unpaid until it is
+       * cancelled.
+       */
+      navigation.replace('Payment', {
+        purpose: 'MEDICINE_ORDER',
+        targetId: order.id,
+        amount: total,
+        nextScreen: 'OrderTracking',
+        nextParams: { orderId: order.id },
+        allowCod: true,
+      });
     } catch (err) {
       Alert.alert('Order failed', errorMessage(err));
     } finally {
