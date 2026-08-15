@@ -41,9 +41,9 @@ export const MedicineStoreScreen: React.FC<{ navigation: any }> = ({ navigation 
   const [query, setQuery] = useState('');
   const cart = useCart();
   const toast = useToast();
-  const { selected, serviceability } = useLocation();
+  const { active, activePincode, serviceability, ready, locating, detectFromGps } = useLocation();
 
-  const pincode = selected?.pincode;
+  const pincode = activePincode ?? undefined;
 
   /**
    * The catalogue is fetched per area. Keying the request on the pincode means
@@ -102,18 +102,35 @@ export const MedicineStoreScreen: React.FC<{ navigation: any }> = ({ navigation 
     </>
   );
 
-  /* ---------- No address yet ---------- */
+  /* ---------- No location yet ---------- */
 
-  if (!selected) {
+  /**
+   * Wait for the startup resolution before declaring the user location-less.
+   * `ready` covers the cached-pincode and saved-address lookups; `locating`
+   * covers the GPS attempt that follows when neither answered. Skipping this
+   * flashes "where should we deliver?" at someone whose location is a beat away.
+   */
+  if (!ready || locating) {
+    return (
+      <Screen padded={false} bottomInset={spacing.xxl}>
+        {header}
+        <Loading label={locating ? 'Finding your location' : 'Loading'} />
+      </Screen>
+    );
+  }
+
+  if (!active) {
     return (
       <Screen padded={false} bottomInset={spacing.xxl}>
         {header}
         <EmptyState
           icon="location_off"
           title="Where should we deliver?"
-          message="Add an address and we'll show what's in stock near you, with real prices."
-          actionLabel="Set your address"
-          onActionPress={() => navigation.navigate('AddressBook')}
+          message="Share your location and we'll show what's in stock near you, with real prices. You can enter a pincode instead."
+          actionLabel="Use my location"
+          onActionPress={() => void detectFromGps()}
+          secondaryActionLabel="Enter pincode"
+          onSecondaryActionPress={() => navigation.navigate('AddressBook')}
         />
       </Screen>
     );
@@ -134,10 +151,10 @@ export const MedicineStoreScreen: React.FC<{ navigation: any }> = ({ navigation 
             <Icon name="local_shipping" size={40} color={colors.captionGray} />
           </View>
           <Text variant="headlineSmMobile" color={colors.headingDark}>
-            We don&apos;t deliver to {selected.pincode} yet
+            We don&apos;t deliver to {active.pincode} yet
           </Text>
           <Text variant="bodyMd" color={colors.captionGray} style={styles.gateBody}>
-            No pharmacy near {selected.city ?? 'this area'} has signed up with us so far. You can
+            No pharmacy near {active.city ?? 'this area'} has signed up with us so far. You can
             still book consultations and lab tests from here.
           </Text>
           <Button

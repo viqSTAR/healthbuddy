@@ -12,6 +12,16 @@ export interface EmptyStateProps {
   message?: string;
   actionLabel?: string;
   onActionPress?: () => void;
+  /**
+   * A second way out of the same dead end.
+   *
+   * Some empty states have two honest answers — "use my location" and "type a
+   * pincode" — and offering only the first strands anyone who declines the
+   * permission. Rendered quieter than the primary so the recommended path still
+   * reads as the recommended one.
+   */
+  secondaryActionLabel?: string;
+  onSecondaryActionPress?: () => void;
 }
 
 export const EmptyState: React.FC<EmptyStateProps> = ({
@@ -20,6 +30,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   message,
   actionLabel,
   onActionPress,
+  secondaryActionLabel,
+  onSecondaryActionPress,
 }) => (
   <View style={styles.container}>
     <View style={styles.iconBox}>
@@ -35,6 +47,14 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     ) : null}
     {actionLabel ? (
       <Button label={actionLabel} onPress={onActionPress} size="md" style={styles.action} />
+    ) : null}
+    {secondaryActionLabel ? (
+      <Button
+        label={secondaryActionLabel}
+        onPress={onSecondaryActionPress}
+        size="md"
+        variant="ghost"
+      />
     ) : null}
   </View>
 );

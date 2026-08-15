@@ -37,9 +37,11 @@ export const DoctorDirectoryScreen: React.FC<{ navigation: any; route: any }> = 
   const [specialty, setSpecialty] = useState<string>(route.params?.specialty ?? 'All');
   const [query, setQuery] = useState('');
   const [visitType, setVisitType] = useState<'VIDEO' | 'IN_PERSON'>('VIDEO');
-  const { selected } = useLocation();
+  const { active } = useLocation();
 
-  const pincode = selected?.pincode;
+  // In-person doctors are filtered by area, and a detected pincode locates the
+  // patient just as well as a saved address does for that purpose.
+  const pincode = active?.pincode;
 
   const { data, loading, error, refreshing, refresh, reload } = useAsync(
     () =>
@@ -134,7 +136,7 @@ export const DoctorDirectoryScreen: React.FC<{ navigation: any; route: any }> = 
                   obvious question the moment a filter silently narrows a list. */}
               {visitType === 'IN_PERSON'
                 ? pincode
-                  ? ` near ${selected?.city ?? pincode}`
+                  ? ` near ${active?.city ?? pincode}`
                   : ' — set an address to find clinics near you'
                 : ' · video reaches anywhere'}
             </Text>

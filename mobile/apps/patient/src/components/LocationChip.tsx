@@ -14,11 +14,29 @@ const LABEL: Record<string, string> = { HOME: 'Home', WORK: 'Work', OTHER: 'Save
  * settings page means people see a catalogue without knowing which one.
  */
 export const LocationChip: React.FC<{ onPress: () => void }> = ({ onPress }) => {
-  const { selected, serviceability } = useLocation();
+  const { active, serviceability, locating } = useLocation();
 
-  const line = selected
-    ? [selected.line1, selected.city].filter(Boolean).join(', ')
-    : 'Set your delivery address';
+  /**
+   * A detected pincode is a real location and says so. Showing "Set your
+   * delivery address" while the app is already pricing a catalogue against a
+   * pincode it worked out from GPS tells the user nothing is set when
+   * something is.
+   */
+  const line = active
+    ? active.address
+      ? [active.address.line1, active.address.city].filter(Boolean).join(', ')
+      : [active.city, active.state].filter(Boolean).join(', ') || `Pincode ${active.pincode}`
+    : locating
+      ? 'Finding your location…'
+      : 'Set your delivery location';
+
+  const heading = active
+    ? active.address
+      ? (LABEL[active.address.label] ?? 'Saved')
+      : active.source === 'gps'
+        ? 'Current location'
+        : 'Delivering to'
+    : 'Deliver to';
 
   // Only ever shown as a warning once we have a definite "no" — an unresolved
   // check must not flash a scary state at someone whose network is just slow.
@@ -40,11 +58,11 @@ export const LocationChip: React.FC<{ onPress: () => void }> = ({ onPress }) => 
       <View style={styles.body}>
         <View style={styles.topRow}>
           <Text variant="captionSm" weight="semibold" color={colors.primary}>
-            {selected ? (LABEL[selected.label] ?? 'Saved') : 'Deliver to'}
+            {heading}
           </Text>
-          {selected ? (
+          {active ? (
             <Text variant="captionSm" color={colors.captionGray}>
-              {selected.pincode}
+              {active.pincode}
             </Text>
           ) : null}
         </View>
