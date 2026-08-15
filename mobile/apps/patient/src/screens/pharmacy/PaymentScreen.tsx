@@ -55,6 +55,9 @@ export interface PaymentRouteParams {
   nextParams?: Record<string, unknown>;
   /** COD is refused for things nobody hands over at a door. */
   allowCod?: boolean;
+  /** Passed through so the confirmation can say where collection happens. */
+  collectionAddress?: string | null;
+  testName?: string;
 }
 
 export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
@@ -68,6 +71,8 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
     nextScreen,
     nextParams,
     allowCod = true,
+    collectionAddress,
+    testName,
   } = (route.params ?? {}) as PaymentRouteParams;
 
   const [method, setMethod] = useState<PaymentMethod>('UPI');
@@ -75,7 +80,23 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
 
   const options = METHODS.filter((m) => m.value !== 'COD' || allowCod);
 
-  const done = () => navigation.replace(nextScreen, nextParams ?? {});
+  /**
+   * A confirmation screen rather than an alert.
+   *
+   * This is the moment the patient has just paid and has no idea what they have
+   * bought — whether someone is coming to their door, whether they have to go
+   * somewhere, when anything arrives. An OK button answers none of that.
+   */
+  const done = (settled: PaymentMethod) =>
+    navigation.replace('OrderConfirmed', {
+      purpose,
+      amount,
+      method: settled,
+      trackScreen: nextScreen,
+      trackParams: nextParams ?? {},
+      ...(collectionAddress ? { collectionAddress } : {}),
+      ...(testName ? { testName } : {}),
+    });
 
   const pay = async () => {
     setPaying(true);
@@ -87,7 +108,7 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
        * server has already released the order to the partner on that basis.
        */
       if (checkout.method === 'COD') {
-        Alert.alert('Order confirmed', checkout.message, [{ text: 'Track it', onPress: done }]);
+        done('COD');
         return;
       }
 
@@ -99,9 +120,7 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
        * configured, and that error is worth showing rather than swallowing.
        */
       await simulatePayment(checkout.paymentId);
-      Alert.alert('Payment received', `₹${amount.toFixed(2)} paid. Your order is confirmed.`, [
-        { text: 'Track it', onPress: done },
-      ]);
+      done(checkout.method);
     } catch (err) {
       Alert.alert('Payment failed', errorMessage(err));
     } finally {

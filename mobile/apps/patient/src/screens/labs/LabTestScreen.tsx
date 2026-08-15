@@ -96,6 +96,8 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
         nextScreen: 'LabResult',
         nextParams: { orderId: order.id },
         allowCod: false,
+        testName: pkg.testName,
+        collectionAddress: pkg.homeCollection ? (selected?.line1 ?? null) : null,
       });
     } catch (err) {
       Alert.alert('Could not book', errorMessage(err));

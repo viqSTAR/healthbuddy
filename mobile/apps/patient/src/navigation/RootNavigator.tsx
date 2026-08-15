@@ -37,6 +37,7 @@ import { CartScreen } from '../screens/pharmacy/CartScreen';
 import { MyOrdersScreen } from '../screens/pharmacy/MyOrdersScreen';
 import { OrderTrackingScreen } from '../screens/pharmacy/OrderTrackingScreen';
 import { PaymentScreen } from '../screens/pharmacy/PaymentScreen';
+import { OrderConfirmedScreen } from '../screens/pharmacy/OrderConfirmedScreen';
 
 // Labs
 import { LabTestScreen } from '../screens/labs/LabTestScreen';
@@ -125,6 +126,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="Pharmacy" component={MedicineStoreScreen} />
             <Stack.Screen name="Cart" component={CartScreen} />
             <Stack.Screen name="Payment" component={PaymentScreen} />
+            <Stack.Screen name="OrderConfirmed" component={OrderConfirmedScreen} />
             <Stack.Screen name="OrderTracking" component={OrderTrackingScreen} />
             <Stack.Screen name="Labs" component={LabTestScreen} />
             <Stack.Screen name="LabResult" component={LabResultScreen} />
