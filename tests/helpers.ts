@@ -5,8 +5,21 @@ import { platformNow } from '../src/utils/clock.js';
 
 export { app, prisma, request };
 
-/** Phone numbers are namespaced per run so parallel runs don't collide. */
-const RUN_ID = Date.now().toString().slice(-6);
+/**
+ * Phone numbers are namespaced per worker so concurrent runs don't collide.
+ *
+ * This was `Date.now()`, which is not unique enough: the test runner starts each
+ * file in its own process, and two of them launching in the same millisecond got
+ * identical prefixes. Both then issued an OTP for the same number, the second
+ * send overwrote the first's hash in Redis, and the first verify failed with
+ * "Incorrect verification code" — a failure with nothing to do with the code
+ * under test. The pid separates concurrent workers; the random suffix covers pid
+ * reuse across runs. Six digits, so the prefix contract `cleanupTestUsers`
+ * relies on is unchanged.
+ */
+const RUN_ID =
+  String(process.pid % 1000).padStart(3, '0') +
+  String(Math.floor(Math.random() * 1000)).padStart(3, '0');
 let seq = 0;
 export const uniquePhone = () => `+1999${RUN_ID}${String(seq++).padStart(2, '0')}`;
 

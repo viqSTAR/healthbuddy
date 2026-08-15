@@ -9,13 +9,13 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --import ./tests/testEnv.mjs --test --test-reporter=spec tests/**/*.test.ts",
+    "test": "node --import tsx --import ./tests/testEnv.mjs --test --test-concurrency=1 --test-reporter=spec tests/**/*.test.ts",
     "test:watch": "npm test -- --watch",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
     "storage:check": "tsx scripts/checkStorage.ts",
-    "test:security": "node --import tsx --import ./tests/testEnv.mjs --test --test-reporter=spec tests/security.test.ts"
+    "test:security": "node --import tsx --import ./tests/testEnv.mjs --test --test-concurrency=1 --test-reporter=spec tests/security.test.ts"
   },
   "keywords": [
     "healthbuddy",
