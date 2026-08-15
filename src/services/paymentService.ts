@@ -1018,23 +1018,35 @@ export const listPartnerEarningsService = async (
   payeeId: string,
   limit = 100
 ) => {
-  const splits = await prisma.paymentSplit.findMany({
-    where: { payeeType, payeeId },
-    orderBy: { createdAt: 'desc' },
-    take: Math.min(limit, 200),
-    include: { payment: { select: { purpose: true, method: true, status: true, paidAt: true } } },
-  });
+  /**
+   * The totals are aggregated across every leg this partner has ever been
+   * credited; only the statement below is a page.
+   *
+   * They used to be summed from the same capped `findMany`, so a partner past
+   * the limit saw a headline "Settled" figure that silently stopped counting
+   * their oldest earnings — understating what the platform owed them, on the
+   * one screen they check to find out.
+   */
+  const [totals, splits] = await Promise.all([
+    prisma.paymentSplit.groupBy({
+      by: ['status'],
+      where: { payeeType, payeeId },
+      _sum: { amount: true },
+    }),
+    prisma.paymentSplit.findMany({
+      where: { payeeType, payeeId },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 200),
+      include: { payment: { select: { purpose: true, method: true, status: true, paidAt: true } } },
+    }),
+  ]);
 
-  const settled = splits
-    .filter((s) => s.status === 'SETTLED')
-    .reduce((sum, s) => sum + s.amount, 0);
-  const pending = splits
-    .filter((s) => s.status === 'PENDING')
-    .reduce((sum, s) => sum + s.amount, 0);
+  const totalFor = (status: 'SETTLED' | 'PENDING') =>
+    totals.find((t) => t.status === status)?._sum.amount ?? 0;
 
   return {
-    settledTotal: Number(settled.toFixed(2)),
-    pendingTotal: Number(pending.toFixed(2)),
+    settledTotal: Number(totalFor('SETTLED').toFixed(2)),
+    pendingTotal: Number(totalFor('PENDING').toFixed(2)),
     lines: splits.map((s) => ({
       id: s.id,
       amount: s.amount,
