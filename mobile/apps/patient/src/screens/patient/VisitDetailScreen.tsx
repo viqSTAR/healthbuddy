@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, Linking } from 'react-native';
 import {
   Badge,
@@ -13,8 +13,11 @@ import {
   Text,
   TopBar,
   colors,
+  Alert,
+  errorMessage,
   fetchVisit,
   prescriptionPrintUrl,
+  reorderPrescription,
   radius,
   rupees,
   spacing,
@@ -56,6 +59,7 @@ export const VisitDetailScreen: React.FC<{ navigation: any; route: any }> = ({
   route,
 }) => {
   const { visitId } = route.params;
+  const [reordering, setReordering] = useState(false);
   const { data: visit, loading, error, reload, refreshing, refresh } = useAsync(
     () => fetchVisit(visitId),
     [visitId]
@@ -257,11 +261,37 @@ export const VisitDetailScreen: React.FC<{ navigation: any; route: any }> = ({
               The offer expires, so acting on it is only offered while it is
               still live. A button that fails on tap is worse than no button.
             */}
-            {rx.fulfilment && rx.fulfilment.status === 'PENDING_CONSENT' ? (
+            {/*
+              A live offer goes straight to review. A lapsed or declined one is
+              re-quoted first — the prescription is still valid, only the prices
+              went stale, and re-pricing needs no clinical decision. Without
+              this an expired basket is a dead end that sends the patient back
+              to the doctor for arithmetic.
+            */}
+            {rx.fulfilment?.status === 'PENDING_CONSENT' ? (
               <Button
                 label="Review and order"
                 icon="shopping_cart"
-                onPress={() => navigation.navigate('PrescriptionOrder', { fulfilmentId: rx.fulfilment!.id })}
+                onPress={() =>
+                  navigation.navigate('PrescriptionOrder', { fulfilmentId: rx.fulfilment!.id })
+                }
+              />
+            ) : rx.fulfilment?.status === 'CONSENTED' ? null : rx.items.length > 0 ? (
+              <Button
+                label="Order these medicines"
+                icon="shopping_cart"
+                loading={reordering}
+                onPress={async () => {
+                  setReordering(true);
+                  try {
+                    const fresh = await reorderPrescription(rx.id);
+                    navigation.navigate('PrescriptionOrder', { fulfilmentId: fresh.id });
+                  } catch (err) {
+                    Alert.alert('Could not price this prescription', errorMessage(err));
+                  } finally {
+                    setReordering(false);
+                  }
+                }}
               />
             ) : null}
 

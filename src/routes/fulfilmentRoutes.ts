@@ -5,6 +5,7 @@ import {
   getFulfilmentHandler,
   consentHandler,
   declineHandler,
+  requoteHandler,
   expireStaleHandler,
 } from '../controllers/fulfilmentController.js';
 import { authenticateJwt, authorizeRoles } from '../middlewares/auth.js';
@@ -32,15 +33,33 @@ router.post(
       // Empty or absent means "everything in the basket".
       acceptMedicineIds: z.array(uuidSchema).max(50).optional(),
       acceptLabPackageIds: z.array(uuidSchema).max(50).optional(),
-      deliveryAddress: z.string().trim().min(5, 'A delivery address is required.').max(300),
+      // A saved address, or a typed one. The service requires at least one and
+      // copies whichever it resolves onto the order.
+      addressId: uuidSchema.optional(),
+      deliveryAddress: z.string().trim().min(5).max(300).optional(),
       latitude: latitudeSchema.optional(),
       longitude: longitudeSchema.optional(),
       // Approving and choosing how to pay are one action for the patient, so
       // consent carries the method and opens the checkout in the same call.
       paymentMethod: z.enum(['UPI', 'CARD', 'NETBANKING', 'WALLET', 'COD']).default('UPI'),
-    }),
+    })
+      .refine((b) => Boolean(b.addressId ?? b.deliveryAddress), {
+        message: 'Choose a saved address or enter one.',
+      }),
   }),
   consentHandler
+);
+
+/**
+ * Re-quote. A prescription outlives its price quote, and re-pricing the same
+ * drugs needs no clinical decision — so the patient can ask for it rather than
+ * being sent back to the doctor.
+ */
+router.post(
+  '/prescription/:prescriptionId/reorder',
+  authorizeRoles('PATIENT'),
+  validate({ params: z.object({ prescriptionId: uuidSchema }) }),
+  requoteHandler
 );
 
 router.post(

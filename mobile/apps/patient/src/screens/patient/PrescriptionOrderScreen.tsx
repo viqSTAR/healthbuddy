@@ -29,6 +29,7 @@ import {
   type MedicineQuoteLine,
   type PaymentMethod,
 } from '@healthbuddy/shared';
+import { useLocation } from '../../services/location';
 
 const hoursLeft = (iso: string): number =>
   Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 3600_000));
@@ -69,6 +70,7 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
   const [excludedMedicines, setExcludedMedicines] = useState<Set<string>>(new Set());
   const [excludedTests, setExcludedTests] = useState<Set<string>>(new Set());
   const [address, setAddress] = useState('');
+  const { selected } = useLocation();
   const [method, setMethod] = useState<PaymentMethod>('UPI');
   const [busy, setBusy] = useState(false);
 
@@ -137,11 +139,14 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
       const result = await consentToFulfilment(fulfilmentId, {
         acceptMedicineIds,
         acceptLabPackageIds,
-        deliveryAddress: address.trim(),
-        // Sent when the profile has them, so a rider has coordinates as well
-        // as a written address.
-        ...(profile.data?.latitude != null ? { latitude: profile.data.latitude } : {}),
-        ...(profile.data?.longitude != null ? { longitude: profile.data.longitude } : {}),
+        // The saved address wins. Sent by id so the server resolves and copies
+        // it, exactly as the store and lab bookings already do — a patient
+        // should not retype their address once per order type.
+        ...(selected ? { addressId: selected.id } : { deliveryAddress: address.trim() }),
+        // Coordinates when the address was captured by GPS, so a rider has a
+        // point as well as a written address.
+        ...(selected?.latitude != null ? { latitude: selected.latitude } : {}),
+        ...(selected?.longitude != null ? { longitude: selected.longitude } : {}),
         paymentMethod: method,
       });
 
@@ -300,14 +305,42 @@ export const PrescriptionOrderScreen: React.FC<{ route: any; navigation: any }> 
         <>
           <SectionHeader title="Deliver to" />
           <Card>
-            <Input
-              label="Delivery address"
-              icon="location_on"
-              value={address}
-              onChangeText={setAddress}
-              placeholder="Flat, street, landmark"
-              multiline
-            />
+            {selected ? (
+              <Pressable onPress={() => navigation.navigate('AddressBook')} style={styles.addressRow}>
+                <Icon name="location_on" size={20} color={colors.primary} />
+                <View style={styles.flex}>
+                  <Text variant="captionSm" weight="semibold" color={colors.primary}>
+                    {selected.label === 'WORK' ? 'Work' : selected.label === 'OTHER' ? 'Saved' : 'Home'}
+                  </Text>
+                  <Text variant="captionSm" color={colors.headingDark}>
+                    {[selected.line1, selected.city, selected.pincode].filter(Boolean).join(', ')}
+                  </Text>
+                </View>
+                <Text variant="captionSm" weight="medium" color={colors.primary}>
+                  Change
+                </Text>
+              </Pressable>
+            ) : (
+              /* No saved address yet: typing one still works, and the picker is
+                 one tap away rather than the only route forward. */
+              <>
+                <Input
+                  label="Delivery address"
+                  icon="location_on"
+                  value={address}
+                  onChangeText={setAddress}
+                  placeholder="Flat, street, landmark"
+                  multiline
+                />
+                <Button
+                  label="Use a saved address"
+                  variant="secondary"
+                  icon="bookmark"
+                  size="sm"
+                  onPress={() => navigation.navigate('AddressBook')}
+                />
+              </>
+            )}
           </Card>
 
           <SectionHeader title="Payment" />
@@ -523,6 +556,7 @@ const SummaryRow: React.FC<{ label: string; value: number; hint?: string }> = ({
 );
 
 const styles = StyleSheet.create({
+  addressRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.insetCard },
   flex: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.insetCard },
   notice: {

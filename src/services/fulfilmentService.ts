@@ -334,7 +334,14 @@ export interface ConsentInput {
   /** Lets the patient drop items they already have. Empty means "everything". */
   acceptMedicineIds?: string[];
   acceptLabPackageIds?: string[];
-  deliveryAddress: string;
+  /**
+   * A saved address, preferred. The only form carrying a pincode the platform
+   * has validated, and the same book medicine and lab orders already use — a
+   * patient should not be retyping their address once per order type.
+   */
+  addressId?: string;
+  /** Typed address, for a patient who has not saved one. */
+  deliveryAddress?: string;
   latitude?: number;
   longitude?: number;
   paymentMethod: PaymentMethod;
@@ -365,14 +372,41 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
     throw conflict('You have already approved this order.');
   }
   if (fulfilment.status === 'DECLINED') {
-    throw conflict('This order was declined. Ask your doctor to reissue it.');
+    throw conflict('You declined this order. Reorder it to get a fresh quote.');
   }
   if (fulfilment.expiresAt < new Date()) {
     await prisma.prescriptionFulfilment.updateMany({
       where: { id: fulfilment.id, status: 'PENDING_CONSENT' },
       data: { status: 'EXPIRED' },
     });
-    throw new AppError('This offer has expired. Ask your doctor to reissue it.', 410);
+    // Reorder rather than "ask your doctor": the prescription is still valid,
+    // it is the *prices* that went stale, and re-quoting needs no clinical
+    // decision — sending the patient back to the doctor for one would be
+    // friction with no safety value.
+    throw new AppError('This offer has expired. Reorder it for current prices.', 410);
+  }
+
+  /**
+   * Where it goes. A saved address wins, and is copied rather than referenced —
+   * an address-book entry can be edited afterwards, and an order must record
+   * where it was actually sent.
+   */
+  let deliveryAddress = input.deliveryAddress?.trim() ?? '';
+
+  if (input.addressId) {
+    const saved = await prisma.address.findFirst({
+      where: { id: input.addressId, patientId: input.patientId },
+      select: { line1: true, line2: true, landmark: true, city: true, state: true, pincode: true },
+    });
+    if (!saved) throw notFound('Address');
+
+    deliveryAddress = [saved.line1, saved.line2, saved.landmark, saved.city, saved.state, saved.pincode]
+      .filter((part): part is string => Boolean(part && part.trim()))
+      .join(', ');
+  }
+
+  if (deliveryAddress.length < 5) {
+    throw new AppError('A delivery address is required.', 400);
   }
 
   const medicines = (fulfilment.medicineQuote ?? []) as unknown as MedicineQuoteLine[];
@@ -430,7 +464,7 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
           })) as unknown as Prisma.InputJsonValue,
           totalAmount: Number(total.toFixed(2)),
           deliveryFee,
-          address: input.deliveryAddress,
+          address: deliveryAddress,
           latitude: input.latitude ?? null,
           longitude: input.longitude ?? null,
           // Carrying the prescription is what lets the pharmacy dispatch
@@ -471,7 +505,7 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
           labPartnerId: test.labPartnerId,
           testName: test.testName,
           price: (test.price ?? 0) + test.homeCollectionFee,
-          address: input.deliveryAddress,
+          address: deliveryAddress,
           latitude: input.latitude ?? null,
           longitude: input.longitude ?? null,
           status: 'PENDING_PAYMENT',
@@ -561,4 +595,56 @@ export const expireStaleFulfilmentsService = async () => {
   });
   if (result.count > 0) logger.info(`[fulfilment] expired ${result.count} unanswered offer(s)`);
   return { expired: result.count };
+};
+
+/**
+ * Re-quotes a prescription whose offer has lapsed.
+ *
+ * A prescription stays clinically valid for far longer than a price does. The
+ * basket expires so nobody is charged a figure they were quoted weeks ago — but
+ * that expiry used to be a dead end, sending the patient back to the doctor for
+ * something that needs no clinical decision at all. Re-pricing the same drugs
+ * is arithmetic, so the patient can ask for it themselves.
+ *
+ * What is deliberately *not* re-decided: which drugs. Those come from the
+ * prescription and are untouched. Only availability and price are recomputed,
+ * which is why this cannot be used to obtain anything the doctor did not write.
+ */
+export const requoteFulfilmentService = async (prescriptionId: string, patientId: string) => {
+  const prescription = await prisma.prescription.findUnique({
+    where: { id: prescriptionId },
+    select: { id: true, patientId: true, fulfilment: { select: { id: true, status: true } } },
+  });
+
+  // 404 rather than 403 so prescription ids cannot be probed across patients.
+  if (!prescription || prescription.patientId !== patientId) throw notFound('Prescription');
+
+  const existing = prescription.fulfilment;
+
+  if (existing?.status === 'CONSENTED') {
+    throw conflict('You have already ordered this prescription.');
+  }
+  if (existing?.status === 'PENDING_CONSENT') {
+    // Still live — hand back what is already on offer rather than silently
+    // rebuilding it at a different price under the patient's feet.
+    return getFulfilmentService(existing.id, patientId);
+  }
+
+  // Only a lapsed or declined offer is replaced, and neither has orders hanging
+  // off it — a consented one would, which is why that case is refused above.
+  if (existing) {
+    await prisma.prescriptionFulfilment.delete({ where: { id: existing.id } });
+  }
+
+  await createFulfilmentForPrescription(prescriptionId);
+
+  const fresh = await prisma.prescriptionFulfilment.findUnique({
+    where: { prescriptionId },
+    select: { id: true },
+  });
+  if (!fresh) {
+    throw new AppError('Nothing in this prescription can be ordered right now.', 409);
+  }
+
+  return getFulfilmentService(fresh.id, patientId);
 };

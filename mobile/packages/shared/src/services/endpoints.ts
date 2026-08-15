@@ -1379,12 +1379,29 @@ export const fetchFulfilment = async (id: string) =>
  * No prices are sent — the server charges from the stored quote, so what the
  * patient approved is exactly what they pay.
  */
+/**
+ * Re-prices a prescription whose offer lapsed.
+ *
+ * A prescription outlives its quote. Re-pricing the same drugs is arithmetic,
+ * not a clinical decision, so the patient can ask for it rather than being sent
+ * back to the doctor. Returns the live offer unchanged if one already exists.
+ */
+export const reorderPrescription = async (prescriptionId: string) =>
+  (
+    await api.post<{ fulfilment: Fulfilment }>(
+      `/fulfilments/prescription/${prescriptionId}/reorder`
+    )
+  ).data.fulfilment;
+
 export const consentToFulfilment = async (
   id: string,
   payload: {
     acceptMedicineIds?: string[];
     acceptLabPackageIds?: string[];
-    deliveryAddress: string;
+    /** A saved address, preferred — the same book the store and labs use. */
+    addressId?: string;
+    /** Typed address, for a patient who has not saved one. */
+    deliveryAddress?: string;
     latitude?: number;
     longitude?: number;
     paymentMethod: PaymentMethod;

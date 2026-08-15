@@ -6,6 +6,7 @@ import {
   consentToFulfilmentService,
   declineFulfilmentService,
   expireStaleFulfilmentsService,
+  requoteFulfilmentService,
 } from '../services/fulfilmentService.js';
 import {
   asyncHandler,
@@ -36,7 +37,8 @@ export const consentHandler = asyncHandler(async (req: AuthenticatedRequest, res
   const body = req.body as {
     acceptMedicineIds?: string[];
     acceptLabPackageIds?: string[];
-    deliveryAddress: string;
+    addressId?: string;
+    deliveryAddress?: string;
     latitude?: number;
     longitude?: number;
     paymentMethod: PaymentMethod;
@@ -48,7 +50,8 @@ export const consentHandler = asyncHandler(async (req: AuthenticatedRequest, res
     userId: requireUser(req).userId,
     ...(body.acceptMedicineIds ? { acceptMedicineIds: body.acceptMedicineIds } : {}),
     ...(body.acceptLabPackageIds ? { acceptLabPackageIds: body.acceptLabPackageIds } : {}),
-    deliveryAddress: body.deliveryAddress,
+    ...(body.addressId ? { addressId: body.addressId } : {}),
+    ...(body.deliveryAddress ? { deliveryAddress: body.deliveryAddress } : {}),
     ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
     ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
     paymentMethod: body.paymentMethod,
@@ -67,4 +70,19 @@ export const declineHandler = asyncHandler(async (req: AuthenticatedRequest, res
 
 export const expireStaleHandler = asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
   res.status(200).json({ success: true, ...(await expireStaleFulfilmentsService()) });
+});
+
+/**
+ * Re-prices a prescription whose offer lapsed.
+ *
+ * Keyed on the prescription rather than the old fulfilment id: the patient is
+ * acting on "these medicines", and the stale basket is an implementation detail
+ * they should not have to name.
+ */
+export const requoteHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const fulfilment = await requoteFulfilmentService(
+    (req.params as { prescriptionId: string }).prescriptionId,
+    requirePatientId(req)
+  );
+  res.status(200).json({ success: true, fulfilment });
 });
