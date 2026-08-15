@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, StyleSheet } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   Badge,
   Button,
@@ -101,6 +102,22 @@ export const MedicalRecordsScreen: React.FC<{ navigation: any }> = ({ navigation
   const reports = useAsync(() => fetchMyLabOrders(), []);
 
   const active = tab === 'visits' ? visits : reports;
+
+  /**
+   * Re-read on every focus.
+   *
+   * useAsync fetches on mount, and a tab screen mounts once — so booking a
+   * consultation and coming straight back here showed "No visits yet" over a
+   * record that already existed, until the list was pulled down by hand. The
+   * whole point of this screen is to show what just happened.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      visits.refresh();
+      reports.refresh();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+  );
 
   const visibleVisits = (visits.data ?? []).filter((v) => {
     if (visitFilter === 'all') return true;

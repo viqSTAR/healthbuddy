@@ -40,6 +40,25 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
 
   const inputs = useRef<(TextInput | null)[]>([]);
 
+  /**
+   * A mirror of `digits` that is correct *now* rather than as of the last
+   * render.
+   *
+   * Each box fires its own onChangeText, and when they arrive faster than React
+   * re-renders — a fast typist, an SMS autofill delivering a digit at a time —
+   * every handler in that burst reads the same stale `digits` array and writes
+   * over the one before it. Six digits went in and two came out, which then
+   * auto-submitted as a wrong code and burned one of the five attempts the
+   * server allows. Building each update from the ref makes the writes additive
+   * regardless of when React catches up.
+   */
+  const digitsRef = useRef<string[]>(Array(OTP_LENGTH).fill(''));
+
+  const commit = useCallback((next: string[]) => {
+    digitsRef.current = next;
+    setDigits(next);
+  }, []);
+
   useEffect(() => {
     if (secondsLeft <= 0) return;
     const id = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
@@ -61,6 +80,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
         // On success the navigator swaps to the authenticated stack.
       } catch (err) {
         setError(errorMessage(err, 'Verification failed.'));
+        digitsRef.current = Array(OTP_LENGTH).fill('');
         setDigits(Array(OTP_LENGTH).fill(''));
         inputs.current[0]?.focus();
       } finally {
@@ -79,27 +99,29 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
       const next = Array(OTP_LENGTH)
         .fill('')
         .map((_, i) => spread[i] ?? '');
-      setDigits(next);
+      commit(next);
       inputs.current[Math.min(spread.length, OTP_LENGTH - 1)]?.focus();
       if (spread.length === OTP_LENGTH) void submit(spread.join(''));
       return;
     }
 
-    const next = [...digits];
+    const next = [...digitsRef.current];
     next[index] = cleaned;
-    setDigits(next);
+    commit(next);
     setError(null);
 
     if (cleaned && index < OTP_LENGTH - 1) inputs.current[index + 1]?.focus();
+    // Only ever submit a full code. A burst that has not finished arriving
+    // must not be sent as a short one.
     if (next.every((d) => d)) void submit(next.join(''));
   };
 
   const onKeyPress = (index: number, key: string) => {
-    if (key === 'Backspace' && !digits[index] && index > 0) {
+    if (key === 'Backspace' && !digitsRef.current[index] && index > 0) {
       inputs.current[index - 1]?.focus();
-      const next = [...digits];
+      const next = [...digitsRef.current];
       next[index - 1] = '';
-      setDigits(next);
+      commit(next);
     }
   };
 
@@ -107,7 +129,7 @@ export const OtpVerificationScreen: React.FC<OtpVerificationScreenProps> = ({
     try {
       await resendOtp();
       setSecondsLeft(RESEND_SECONDS);
-      setDigits(Array(OTP_LENGTH).fill(''));
+      commit(Array(OTP_LENGTH).fill(''));
       setError(null);
       inputs.current[0]?.focus();
     } catch (err) {
