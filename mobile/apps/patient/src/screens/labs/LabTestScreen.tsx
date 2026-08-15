@@ -98,6 +98,9 @@ export const LabTestScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
         allowCod: false,
         testName: pkg.testName,
         collectionAddress: pkg.homeCollection ? (selected?.line1 ?? null) : null,
+        addressText: pkg.homeCollection
+          ? [selected?.line1, selected?.city, selected?.pincode].filter(Boolean).join(', ')
+          : 'Visit the lab - this test cannot be collected at home',
       });
     } catch (err) {
       Alert.alert('Could not book', errorMessage(err));

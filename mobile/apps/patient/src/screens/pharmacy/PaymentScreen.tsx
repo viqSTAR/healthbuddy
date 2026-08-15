@@ -58,6 +58,8 @@ export interface PaymentRouteParams {
   /** Passed through so the confirmation can say where collection happens. */
   collectionAddress?: string | null;
   testName?: string;
+  /** Shown before paying, so nobody pays for a delivery they cannot see. */
+  addressText?: string | null;
 }
 
 export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
@@ -73,6 +75,7 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
     allowCod = true,
     collectionAddress,
     testName,
+    addressText,
   } = (route.params ?? {}) as PaymentRouteParams;
 
   const [method, setMethod] = useState<PaymentMethod>('UPI');
@@ -150,6 +153,39 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
         ₹{amount.toFixed(2)}
       </Text>
 
+      {/*
+        Where this is going, shown before the money moves.
+
+        A lab booking used to jump here straight from the test list, having
+        quietly used whichever address happened to be the default — so the
+        patient paid for a home collection without ever being told where the
+        phlebotomist was being sent. The cart shows this; the payment step did
+        not, which meant the one flow that skipped the cart showed it nowhere.
+
+        Changing it goes back rather than editing in place: the order already
+        exists at this point and carries the address it was created with, so
+        re-pointing it means going back and booking again rather than silently
+        paying for one address and delivering to another.
+      */}
+      {addressText ? (
+        <Card style={styles.address}>
+          <Icon name="location_on" size={18} color={colors.primary} />
+          <View style={styles.flex}>
+            <Text variant="captionSm" color={colors.captionGray}>
+              {purpose === 'LAB_ORDER' ? 'Sample collected from' : 'Deliver to'}
+            </Text>
+            <Text variant="bodyMd" color={colors.headingDark} numberOfLines={2}>
+              {addressText}
+            </Text>
+          </View>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+            <Text variant="captionSm" weight="semibold" color={colors.primary}>
+              Change
+            </Text>
+          </Pressable>
+        </Card>
+      ) : null}
+
       <View style={styles.methods}>
         {options.map((option) => {
           const selected = method === option.value;
@@ -198,6 +234,7 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
 
 const styles = StyleSheet.create({
   pad: { padding: spacing.insetPage },
+  address: { flexDirection: 'row', alignItems: 'center', gap: spacing.base, marginTop: spacing.insetCard },
   methods: { gap: spacing.base, marginVertical: spacing.insetCard },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.insetCard },
   rowSelected: { borderColor: colors.primary, borderWidth: 1.5 },

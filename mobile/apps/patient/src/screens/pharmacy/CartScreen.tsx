@@ -71,6 +71,7 @@ export const CartScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         nextScreen: 'OrderTracking',
         nextParams: { orderId: order.id },
         allowCod: true,
+        addressText: [selected.line1, selected.city, selected.pincode].filter(Boolean).join(', '),
       });
     } catch (err) {
       Alert.alert('Order failed', errorMessage(err));
