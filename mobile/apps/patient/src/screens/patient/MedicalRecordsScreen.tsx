@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Chip,
+  ChipRow,
   EmptyState,
   ErrorState,
   Icon,
@@ -63,13 +64,61 @@ const joinLabel = (join: JoinState): string =>
  * under two names. Reports keep a tab because a patient can book a test without
  * ever seeing a doctor, and those belong to nothing else.
  */
+/**
+ * The filters each tab offers.
+ *
+ * Deliberately few, and named for what the patient is looking for rather than
+ * for the statuses underneath. Someone opening this screen is nearly always
+ * after one of two things — the consultation they had last week, or the test
+ * result they are still waiting on — and a filter per database status would
+ * bury both behind a list of words like ACCEPTED and SAMPLE_COLLECTED.
+ *
+ * Both lists arrive newest-first from the server and stay that way: filtering
+ * only removes rows, it never reorders them.
+ */
+type VisitFilter = 'all' | 'upcoming' | 'completed' | 'cancelled';
+type ReportFilter = 'all' | 'awaiting' | 'ready';
+
+const VISIT_FILTERS: { value: VisitFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'upcoming', label: 'Upcoming' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+
+const REPORT_FILTERS: { value: ReportFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'awaiting', label: 'In progress' },
+  { value: 'ready', label: 'Ready' },
+];
+
 export const MedicalRecordsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [tab, setTab] = useState<Tab>('visits');
+  const [visitFilter, setVisitFilter] = useState<VisitFilter>('all');
+  const [reportFilter, setReportFilter] = useState<ReportFilter>('all');
 
   const visits = useAsync(() => fetchVisits(), []);
   const reports = useAsync(() => fetchMyLabOrders(), []);
 
   const active = tab === 'visits' ? visits : reports;
+
+  const visibleVisits = (visits.data ?? []).filter((v) => {
+    if (visitFilter === 'all') return true;
+    if (visitFilter === 'upcoming') return v.status === 'SCHEDULED' || v.status === 'IN_PROGRESS';
+    if (visitFilter === 'completed') return v.status === 'COMPLETED';
+    return v.status === 'CANCELLED';
+  });
+
+  /**
+   * "Ready" is the only thing worth separating on a report: everything before it
+   * is the same wait from the patient's side, whether the sample is still in
+   * the van or already on a bench.
+   */
+  const visibleReports = (reports.data ?? []).filter((r) => {
+    if (reportFilter === 'all') return true;
+    if (reportFilter === 'ready') return r.status === 'COMPLETED';
+    return r.status !== 'COMPLETED' && r.status !== 'CANCELLED';
+  });
 
   return (
     <Screen
@@ -97,14 +146,35 @@ export const MedicalRecordsScreen: React.FC<{ navigation: any }> = ({ navigation
         />
       </View>
 
+      {/* Newest first, always — the filter narrows the list, never reorders it. */}
+      <ChipRow>
+        {tab === 'visits'
+          ? VISIT_FILTERS.map((f) => (
+              <Chip
+                key={f.value}
+                label={f.label}
+                selected={visitFilter === f.value}
+                onPress={() => setVisitFilter(f.value)}
+              />
+            ))
+          : REPORT_FILTERS.map((f) => (
+              <Chip
+                key={f.value}
+                label={f.label}
+                selected={reportFilter === f.value}
+                onPress={() => setReportFilter(f.value)}
+              />
+            ))}
+      </ChipRow>
+
       <View style={styles.page}>
         {active.loading ? (
           <Loading />
         ) : active.error ? (
           <ErrorState message={active.error} onRetry={active.reload} />
         ) : tab === 'visits' ? (
-          visits.data?.length ? (
-            visits.data.map((visit) => (
+          visibleVisits.length ? (
+            visibleVisits.map((visit) => (
               <VisitCard
                 key={visit.id}
                 visit={visit}
@@ -112,6 +182,16 @@ export const MedicalRecordsScreen: React.FC<{ navigation: any }> = ({ navigation
                 onJoin={() => navigation.navigate('JoinLobby', { appointmentId: visit.id })}
               />
             ))
+          ) : visitFilter !== 'all' ? (
+            // A filtered-out list is not an empty record — saying "no visits
+            // yet" to someone with ten of them just reads as a bug.
+            <EmptyState
+              icon="filter_alt_off"
+              title="Nothing matches this filter"
+              message="You have visits, just none in this state."
+              actionLabel="Show all"
+              onActionPress={() => setVisitFilter('all')}
+            />
           ) : (
             <EmptyState
               icon="event"
@@ -121,8 +201,8 @@ export const MedicalRecordsScreen: React.FC<{ navigation: any }> = ({ navigation
               onActionPress={() => navigation.navigate('Doctors')}
             />
           )
-        ) : reports.data?.length ? (
-          reports.data.map((order) => (
+        ) : visibleReports.length ? (
+          visibleReports.map((order) => (
             <Card
               key={order.id}
               style={styles.card}
@@ -153,6 +233,14 @@ export const MedicalRecordsScreen: React.FC<{ navigation: any }> = ({ navigation
               </View>
             </Card>
           ))
+        ) : reportFilter !== 'all' ? (
+          <EmptyState
+            icon="filter_alt_off"
+            title="Nothing matches this filter"
+            message="You have reports, just none in this state."
+            actionLabel="Show all"
+            onActionPress={() => setReportFilter('all')}
+          />
         ) : (
           <EmptyState
             icon="biotech"
