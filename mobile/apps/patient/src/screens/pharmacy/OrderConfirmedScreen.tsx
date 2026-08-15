@@ -7,6 +7,7 @@ import {
   Text,
   colors,
   radius,
+  rupees,
   spacing,
   type PaymentMethod,
   type PaymentPurpose,
@@ -127,8 +128,8 @@ export const OrderConfirmedScreen: React.FC<{ navigation: any; route: any }> = (
         </Text>
         <Text variant="bodyMd" color={colors.captionGray} center>
           {isCod
-            ? `Pay ₹${amount.toFixed(2)} in cash when it arrives.`
-            : `₹${amount.toFixed(2)} paid · ${method}`}
+            ? `Pay ${rupees(amount)} in cash when it arrives.`
+            : `${rupees(amount)} paid · ${method}`}
         </Text>
       </View>
 
@@ -167,7 +168,7 @@ export const OrderConfirmedScreen: React.FC<{ navigation: any; route: any }> = (
         <Card style={styles.note}>
           <Icon name="payments" size={18} color={colors.secondary} />
           <Text variant="captionSm" color={colors.onSurface} style={styles.flex}>
-            Keep ₹{amount.toFixed(2)} ready. The rider cannot break large notes.
+            Keep {rupees(amount)} ready. The rider cannot break large notes.
           </Text>
         </Card>
       ) : null}

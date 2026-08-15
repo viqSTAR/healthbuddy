@@ -12,6 +12,7 @@ import {
   colors,
   errorMessage,
   radius,
+  rupees,
   simulatePayment,
   spacing,
   startCheckout,
@@ -150,7 +151,7 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
         Amount to pay
       </Text>
       <Text variant="displayBold" color={colors.headingDark}>
-        ₹{amount.toFixed(2)}
+        {rupees(amount)}
       </Text>
 
       {/*
@@ -223,7 +224,7 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
         <Loading label="Talking to your bank" />
       ) : (
         <Button
-          label={method === 'COD' ? 'Confirm order' : `Pay ₹${amount.toFixed(2)}`}
+          label={method === 'COD' ? 'Confirm order' : `Pay ${rupees(amount)}`}
           icon="check_circle"
           onPress={pay}
         />
