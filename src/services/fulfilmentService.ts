@@ -443,25 +443,52 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
       const total = chosenMedicines.reduce((sum, m) => sum + m.itemTotal, 0);
       const deliveryFee = total < FREE_DELIVERY_ABOVE ? DEFAULT_DELIVERY_FEE : 0;
 
-      // Route to the pharmacy that quoted the most lines, so one shop fills the
-      // basket wherever possible.
-      const byPharmacy = new Map<string, number>();
+      /**
+       * Group the lines by the shop that actually quoted each one.
+       *
+       * Every line already carries the pharmacy that priced it, and on a
+       * prescription those routinely differ — the cheapest source for one drug
+       * is often a shop that does not stock the next. This used to route the
+       * whole basket to whichever pharmacy quoted the most lines, which meant
+       * an order was created against a shop that had never quoted some of its
+       * items, at another shop's prices, and then failed to reserve them
+       * because that stock was never on its shelf. A two-line prescription
+       * split across two shops is a 1-1 tie, so it failed roughly whenever the
+       * drugs came from different places.
+       *
+       * The store checkout has always done this correctly; this path simply
+       * never got the same treatment. One shipment per sourcing pharmacy, same
+       * as placeMedicineOrderService.
+       */
+      const byPharmacy = new Map<string, MedicineQuoteLine[]>();
       for (const line of chosenMedicines) {
-        byPharmacy.set(line.pharmacyId, (byPharmacy.get(line.pharmacyId) ?? 0) + 1);
+        const lines = byPharmacy.get(line.pharmacyId);
+        if (lines) lines.push(line);
+        else byPharmacy.set(line.pharmacyId, [line]);
       }
-      const pharmacyId = [...byPharmacy.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+      const asOrderItem = (m: MedicineQuoteLine) => ({
+        medicineId: m.medicineId,
+        name: m.name,
+        price: m.unitPrice,
+        quantity: m.quantity,
+        itemTotal: m.itemTotal,
+        pharmacyId: m.pharmacyId,
+      });
+
+      /**
+       * Kept as the largest supplier so partner and admin views that predate
+       * shipments keep working. It is a convenience, not the truth — the
+       * shipments are.
+       */
+      const pharmacyId =
+        [...byPharmacy.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0];
 
       const order = await prisma.medicineOrder.create({
         data: {
           patientId: input.patientId,
           pharmacyId: pharmacyId ?? null,
-          items: chosenMedicines.map((m) => ({
-            medicineId: m.medicineId,
-            name: m.name,
-            price: m.unitPrice,
-            quantity: m.quantity,
-            itemTotal: m.itemTotal,
-          })) as unknown as Prisma.InputJsonValue,
+          items: chosenMedicines.map(asOrderItem) as unknown as Prisma.InputJsonValue,
           totalAmount: Number(total.toFixed(2)),
           deliveryFee,
           address: deliveryAddress,
@@ -471,8 +498,17 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
           // prescription-only items at all.
           prescriptionId: fulfilment.prescriptionId,
           fulfilmentId: fulfilment.id,
-          // Held until paid. Partner queues filter this status out.
+          // Held until paid. Partner queues filter this status out, and the
+          // shipment queue additionally filters on the order's status, so
+          // creating the parcels now does not release work to a shop early.
           status: 'PENDING_PAYMENT',
+          shipments: {
+            create: [...byPharmacy.entries()].map(([shipmentPharmacyId, lines]) => ({
+              pharmacyId: shipmentPharmacyId,
+              items: lines.map(asOrderItem) as unknown as Prisma.InputJsonValue,
+              subtotal: Number(lines.reduce((sum, l) => sum + l.itemTotal, 0).toFixed(2)),
+            })),
+          },
         },
       });
       created.medicineOrderId = order.id;
@@ -482,18 +518,24 @@ export const consentToFulfilmentService = async (input: ConsentInput) => {
        *
        * Payment normally follows consent within seconds, and reserving here is
        * what stops two patients being promised the last box in that window.
+       * Each shop's lines are reserved against that shop's own shelf — the
+       * previous single call asked one pharmacy to hold stock for drugs another
+       * pharmacy had quoted.
+       *
        * Best-effort: the basket was priced against stock that existed, so a
        * failure here means it moved in the meantime — the order still stands
        * and the pharmacy can cancel it with a reason, which is better than
        * discarding a consent the patient already gave.
        */
-      if (pharmacyId) {
+      for (const [shipmentPharmacyId, lines] of byPharmacy) {
         const held = await reserveStockForOrder(
-          pharmacyId,
-          chosenMedicines.map((m) => ({ medicineId: m.medicineId, quantity: m.quantity }))
+          shipmentPharmacyId,
+          lines.map((m) => ({ medicineId: m.medicineId, quantity: m.quantity }))
         );
         if (!held.reserved) {
-          logger.warn(`[fulfilment] could not reserve stock for order ${order.id}: ${held.shortfall}`);
+          logger.warn(
+            `[fulfilment] could not reserve stock for order ${order.id} at pharmacy ${shipmentPharmacyId}: ${held.shortfall}`
+          );
         }
       }
     }
