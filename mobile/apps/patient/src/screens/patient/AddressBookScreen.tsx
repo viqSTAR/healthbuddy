@@ -23,6 +23,7 @@ import {
   setDefaultAddress,
   spacing,
   updateAddress,
+  useAuth,
   type Address,
   type AddressDraft,
   type AddressLabel,
@@ -47,6 +48,7 @@ const emptyDraft: AddressDraft = { label: 'HOME', line1: '', pincode: '' };
 export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { addresses, selected, select, refresh, loading, locate, locating, locateError } =
     useLocation();
+  const { user } = useAuth();
 
   const [editing, setEditing] = useState<Address | null>(null);
   const [draft, setDraft] = useState<AddressDraft | null>(null);
@@ -57,9 +59,17 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
   const [pincodeNote, setPincodeNote] = useState<string | null>(null);
   const [pincodeOk, setPincodeOk] = useState<boolean | null>(null);
 
+  /**
+   * A new address starts as the account holder's, since that is who it is for
+   * nearly every time. Both fields stay editable below.
+   */
   const openNew = () => {
     setEditing(null);
-    setDraft(emptyDraft);
+    setDraft({
+      ...emptyDraft,
+      receiverName: user?.fullName ?? null,
+      receiverPhone: user?.phoneNumber ?? null,
+    });
     setPincodeNote(null);
     setPincodeOk(null);
     setError(null);
@@ -69,6 +79,8 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
     setEditing(address);
     setDraft({
       label: address.label,
+      receiverName: address.receiverName,
+      receiverPhone: address.receiverPhone,
       line1: address.line1,
       line2: address.line2,
       city: address.city,
@@ -77,7 +89,9 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
       landmark: address.landmark,
     });
     setPincodeNote(null);
-    setPincodeOk(null);
+    // An address already saved has a settled area, so editing it opens straight
+    // on the details rather than making the user re-confirm a pincode.
+    setPincodeOk(true);
     setError(null);
   };
 
@@ -105,10 +119,20 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
             ? `Delivering in ${result.city ?? 'this area'}${result.expressAvailable ? ' · express available' : ''}`
             : "We don't deliver here yet. You can still save it for consultations."
         );
+        // The lookup is the authority on where this pincode is, so its answer
+        // is written into the draft rather than left to the user to type.
+        setDraft((d) =>
+          d ? { ...d, city: result.city ?? d.city ?? null, state: result.state ?? d.state ?? null } : d
+        );
       } catch {
-        // A failed check must not block saving — the order path checks again.
-        setPincodeNote(null);
-        setPincodeOk(null);
+        /**
+         * A failed check must not block the form. The pincode is well-formed
+         * and the order path checks serviceability again anyway, so the address
+         * is still worth saving — treating a flaky network as an invalid
+         * pincode would strand someone who typed a perfectly good one.
+         */
+        setPincodeOk(true);
+        setPincodeNote("Couldn't check delivery here right now. You can still save it.");
       }
     })();
   }, []);
@@ -187,11 +211,33 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
     navigation.goBack();
   };
 
+  /**
+   * Whether we know where this address is yet.
+   *
+   * True once the pincode is well-formed and the lookup has come back with an
+   * answer — including "we don't deliver there", which is still a confirmed
+   * place and still worth saving for consultations. Everything below the
+   * pincode is gated on this.
+   */
+  const areaConfirmed =
+    !!draft && /^[1-9][0-9]{5}$/.test(draft.pincode) && pincodeOk !== null;
+
   if (draft) {
     return (
       <Screen scroll={false}>
         <TopBar title={editing ? 'Edit address' : 'New address'} onBack={close} />
         <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+          {/*
+            Step one: settle *where*, before asking anything else.
+
+            A typed address is only as good as its pincode — that is the field
+            the platform actually decides from, and everything below is worth
+            nothing if it is wrong. So the area is established first, either
+            from the device or by entering a pincode we look up and echo back,
+            and the rest of the form stays out of the way until it resolves.
+            Delivery apps all work this way: nobody is asked for their flat
+            number before the app knows it can deliver to the street.
+          */}
           <Button
             label={locating ? 'Finding you…' : 'Use my current location'}
             variant="secondary"
@@ -204,56 +250,6 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
               {locateError}
             </Text>
           ) : null}
-
-          <ChipRow>
-            {LABELS.map((l) => (
-              <Chip
-                key={l.value}
-                label={l.text}
-                selected={draft.label === l.value}
-                onPress={() => setDraft({ ...draft, label: l.value })}
-              />
-            ))}
-          </ChipRow>
-
-          <Input
-            label="House / flat and street"
-            icon="home"
-            value={draft.line1}
-            onChangeText={(line1) => setDraft({ ...draft, line1 })}
-            placeholder="12 Lokhandwala Road"
-          />
-          <Input
-            label="Area (optional)"
-            icon="map"
-            value={draft.line2 ?? ''}
-            onChangeText={(line2) => setDraft({ ...draft, line2 })}
-            placeholder="Andheri West"
-          />
-          <Input
-            label="Landmark (optional)"
-            icon="push_pin"
-            value={draft.landmark ?? ''}
-            onChangeText={(landmark) => setDraft({ ...draft, landmark })}
-            placeholder="Opposite the metro station"
-          />
-
-          <View style={styles.row}>
-            <Input
-              containerStyle={styles.flex}
-              label="City"
-              icon="location_city"
-              value={draft.city ?? ''}
-              onChangeText={(city) => setDraft({ ...draft, city })}
-            />
-            <Input
-              containerStyle={styles.flex}
-              label="State"
-              icon="public"
-              value={draft.state ?? ''}
-              onChangeText={(state) => setDraft({ ...draft, state })}
-            />
-          </View>
 
           <Input
             label="Pincode"
@@ -270,13 +266,98 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
               : {})}
           />
 
+          {/*
+            The confirmed area, read back rather than typed. City and state come
+            from the pincode lookup, so they cannot disagree with it — a
+            hand-typed "Mumbai" against a Delhi pincode is a delivery that goes
+            to the wrong city.
+          */}
+          {areaConfirmed ? (
+            <Card style={styles.confirmed}>
+              <Icon name="check_circle" size={18} color={colors.primary} />
+              <View style={styles.flex}>
+                <Text variant="captionSm" color={colors.captionGray}>
+                  Delivering to
+                </Text>
+                <Text variant="bodyMd" weight="semibold" color={colors.headingDark}>
+                  {[draft.city, draft.state].filter(Boolean).join(', ') || draft.pincode}
+                </Text>
+              </View>
+            </Card>
+          ) : null}
+
+          {/* Step two: the details, once there is an area to attach them to. */}
+          {areaConfirmed ? (
+            <>
+              <ChipRow>
+                {LABELS.map((l) => (
+                  <Chip
+                    key={l.value}
+                    label={l.text}
+                    selected={draft.label === l.value}
+                    onPress={() => setDraft({ ...draft, label: l.value })}
+                  />
+                ))}
+              </ChipRow>
+
+              <Input
+                label="House / flat and street"
+                icon="home"
+                value={draft.line1}
+                onChangeText={(line1) => setDraft({ ...draft, line1 })}
+                placeholder="12 Lokhandwala Road"
+              />
+              <Input
+                label="Area (optional)"
+                icon="map"
+                value={draft.line2 ?? ''}
+                onChangeText={(line2) => setDraft({ ...draft, line2 })}
+                placeholder="Andheri West"
+              />
+              <Input
+                label="Landmark (optional)"
+                icon="push_pin"
+                value={draft.landmark ?? ''}
+                onChangeText={(landmark) => setDraft({ ...draft, landmark })}
+                placeholder="Opposite the metro station"
+              />
+
+              {/*
+                Prefilled with the account holder, because that is who it
+                usually is, and editable because it is not always: an order to a
+                parent's flat needs the rider to call whoever is actually there.
+              */}
+              <Input
+                label="Receiver's name"
+                icon="person"
+                value={draft.receiverName ?? ''}
+                onChangeText={(receiverName) => setDraft({ ...draft, receiverName })}
+                placeholder="Who should we hand it to?"
+              />
+              <Input
+                label="Receiver's phone"
+                icon="call"
+                value={draft.receiverPhone ?? ''}
+                onChangeText={(receiverPhone) => setDraft({ ...draft, receiverPhone })}
+                keyboardType="phone-pad"
+                placeholder="For delivery updates"
+              />
+            </>
+          ) : null}
+
           {error ? (
             <Text variant="captionSm" color={colors.error}>
               {error}
             </Text>
           ) : null}
 
-          <Button label="Save address" onPress={save} loading={saving} />
+          {areaConfirmed ? (
+            <Button label="Save address" onPress={save} loading={saving} />
+          ) : (
+            <Text variant="captionSm" color={colors.captionGray}>
+              Enter your pincode, or use your location, to continue.
+            </Text>
+          )}
         </ScrollView>
       </Screen>
     );
@@ -357,6 +438,12 @@ export const AddressBookScreen: React.FC<{ navigation: any }> = ({ navigation })
 const styles = StyleSheet.create({
   list: { padding: spacing.insetPage, gap: spacing.insetCard, paddingBottom: spacing.xxl },
   form: { padding: spacing.insetPage, gap: spacing.insetCard, paddingBottom: spacing.xxl },
+  confirmed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.base,
+    backgroundColor: colors.successLight,
+  },
   row: { flexDirection: 'row', gap: spacing.insetCard },
   flex: { flex: 1 },
   cardSelected: { borderWidth: 1.5, borderColor: colors.primary, borderRadius: radius.card },
