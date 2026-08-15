@@ -3,7 +3,6 @@ import { View, StyleSheet } from 'react-native';
 import {
   Avatar,
   Badge,
-  Button,
   Card,
   EmptyState,
   ErrorState,

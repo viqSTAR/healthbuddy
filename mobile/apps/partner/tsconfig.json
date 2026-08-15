@@ -1,11 +1,6 @@
 {
-  "extends": "expo/tsconfig.base",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "jsx": "react-jsx",
-    "moduleResolution": "bundler",
     "paths": {
       "@healthbuddy/shared": ["../../packages/shared/src/index.ts"],
       "@healthbuddy/shared/*": ["../../packages/shared/src/*"]

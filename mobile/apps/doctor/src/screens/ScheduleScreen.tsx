@@ -14,7 +14,6 @@ import {
   errorMessage,
   ErrorState,
   fetchMySchedule,
-  Icon,
   Input,
   Loading,
   radius,

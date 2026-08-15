@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Modal, Pressable, ScrollView } from 'react-native';
+import { View, StyleSheet, Modal, Pressable } from 'react-native';
 import {
   Alert,
   Badge,
