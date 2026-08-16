@@ -6,6 +6,7 @@ import {
   getPatientOrdersHandler,
   getPatientOrderByIdHandler,
   getPharmacyOrderQueueHandler,
+  getMyPharmacyProfileHandler,
   acceptOrderHandler,
   assignOrderAgentHandler,
   updateOrderStatusHandler,
@@ -108,6 +109,9 @@ const shipmentStatus = z.enum([
   'DELIVERED',
   'CANCELLED',
 ]);
+
+/** The shop's own profile — its licence, address and serviceability. */
+router.get('/me', authorizeRoles('PHARMACY'), getMyPharmacyProfileHandler);
 
 /**
  * The queue a partner works from. It lists shipments, not orders, because an

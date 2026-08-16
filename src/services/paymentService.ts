@@ -830,7 +830,64 @@ export const refundForTargetService = async (
 
   if (!payment) return { refunded: false, amount: 0 };
 
-  // Nothing was ever collected on an unpaid or COD order.
+  /**
+   * A cash order sits at PENDING until the rider hands the money over, so
+   * "not PAID" does not mean "failed" here — it usually means "not delivered
+   * yet". Dropping one parcel of a split cash order used to fall into the
+   * branch below and fail the whole payment: the other shop then delivered its
+   * parcel, the rider collected, and nothing could ever settle it because the
+   * payment was already dead. The shop that did the work was never paid.
+   *
+   * So a part-cancellation before collection reduces what is owed instead. The
+   * platform leg absorbs the difference, exactly as it does when the split is
+   * first planned, which keeps the legs summing to the charge.
+   */
+  if (payment.status === 'PENDING' && payment.method === 'COD' && partial) {
+    const splits = await prisma.paymentSplit.findMany({
+      where: { paymentId: payment.id },
+      select: { id: true, payeeType: true, payeeId: true, amount: true, status: true },
+    });
+
+    const dropped = splits.find(
+      (s) =>
+        s.payeeType !== 'PLATFORM' && s.payeeId === partial.splitPayeeId && s.status !== 'REVERSED'
+    );
+    const platformLeg = splits.find((s) => s.payeeType === 'PLATFORM');
+
+    // What the rider should now ask for at the door. Integer paise throughout,
+    // so reducing the bill cannot leave a fraction of a rupee unaccounted for.
+    const owedPaise = Math.max(0, toPaise(toNum(payment.amount)) - toPaise(partial.amount));
+
+    const survivingPaise = splits
+      .filter(
+        (s) => s.payeeType !== 'PLATFORM' && s.status !== 'REVERSED' && s.id !== dropped?.id
+      )
+      .reduce((total, s) => total + toPaise(toNum(s.amount)), 0);
+
+    await prisma.$transaction([
+      prisma.payment.update({
+        where: { id: payment.id },
+        data: { amount: fromPaise(owedPaise) },
+      }),
+      ...(dropped
+        ? [prisma.paymentSplit.update({ where: { id: dropped.id }, data: { status: 'REVERSED' } })]
+        : []),
+      ...(platformLeg
+        ? [
+            prisma.paymentSplit.update({
+              where: { id: platformLeg.id },
+              data: { amount: fromPaise(Math.max(0, owedPaise - survivingPaise)) },
+            }),
+          ]
+        : []),
+    ]);
+
+    // Nothing is returned because nothing was taken — the bill simply shrank.
+    return { refunded: false, amount: toNum(partial.amount) };
+  }
+
+  // Nothing was ever collected on an unpaid order, or on a cash order nobody
+  // has delivered — a whole cancellation here just closes it.
   if (payment.status !== 'PAID') {
     await prisma.payment.updateMany({
       where: { id: payment.id, status: 'PENDING' },
@@ -928,11 +985,18 @@ export const refundForTargetService = async (
  * Only callable by the pharmacy the order was routed to or the agent assigned
  * to it — otherwise anyone could clear a debt that was never settled.
  */
-export const markCodCollectedService = async (orderId: string, actorUserId: string) => {
+/**
+ * Settles the cash without asking who is calling.
+ *
+ * Split out so the last parcel being delivered can settle the order without
+ * impersonating anyone: the caller above authorises a person, this one records
+ * the fact. Returns null when there was nothing to settle, because both callers
+ * treat "already paid" as unremarkable rather than as a failure.
+ */
+const settleCodPayment = async (orderId: string, actorUserId: string | null) => {
   const order = await prisma.medicineOrder.findUnique({
     where: { id: orderId },
     include: {
-      pharmacy: { select: { userId: true } },
       payment: true,
       // An order from an approved prescription is paid as part of the whole
       // basket, so its payment hangs off the fulfilment, not the order.
@@ -940,10 +1004,6 @@ export const markCodCollectedService = async (orderId: string, actorUserId: stri
     },
   });
   if (!order) throw notFound('Order');
-
-  const isPharmacy = order.pharmacy?.userId === actorUserId;
-  const isAgent = order.assignedAgentUserId === actorUserId;
-  if (!isPharmacy && !isAgent) throw notFound('Order');
 
   const payment = order.payment ?? order.fulfilment?.payment ?? null;
   if (!payment || payment.method !== 'COD') {
@@ -954,7 +1014,7 @@ export const markCodCollectedService = async (orderId: string, actorUserId: stri
     where: { id: payment.id, status: 'PENDING' },
     data: { status: 'PAID', paidAt: new Date() },
   });
-  if (claimed.count === 0) throw conflict('This payment is already settled.');
+  if (claimed.count === 0) return null;
 
   await prisma.paymentSplit.updateMany({
     where: { paymentId: payment.id, status: 'PENDING' },
@@ -970,6 +1030,49 @@ export const markCodCollectedService = async (orderId: string, actorUserId: stri
   });
 
   return { paymentId: payment.id, status: 'PAID' as const, amount: payment.amount };
+};
+
+/**
+ * The last parcel of a cash order has been delivered, so the cash has arrived.
+ *
+ * Called by the shipment service rather than by a client. A split order is
+ * delivered by two different shops on two different days, and neither of them
+ * can see the other's parcel — so neither can know it was the last. Only the
+ * server can, and until it did this, a cash order that arrived in two boxes was
+ * never marked paid by anyone and its pharmacies were never settled.
+ */
+export const settleCodOnFinalDeliveryService = (orderId: string) =>
+  settleCodPayment(orderId, null);
+
+/**
+ * The delivery agent or pharmacy confirms the cash actually arrived.
+ *
+ * Only callable by a shop with a parcel in this order or the agent assigned to
+ * it — otherwise anyone could clear a debt that was never settled. Membership
+ * is by shipment, not by the order's own `pharmacyId`: once an order can be
+ * filled by several shops, the second shop has a parcel but is not the order's
+ * pharmacy, and checking the column locked it out of the order it delivered.
+ */
+export const markCodCollectedService = async (orderId: string, actorUserId: string) => {
+  const order = await prisma.medicineOrder.findUnique({
+    where: { id: orderId },
+    select: {
+      assignedAgentUserId: true,
+      pharmacy: { select: { userId: true } },
+      shipments: { select: { pharmacy: { select: { userId: true } } } },
+    },
+  });
+  if (!order) throw notFound('Order');
+
+  const isPharmacy =
+    order.pharmacy?.userId === actorUserId ||
+    order.shipments.some((s) => s.pharmacy.userId === actorUserId);
+  const isAgent = order.assignedAgentUserId === actorUserId;
+  if (!isPharmacy && !isAgent) throw notFound('Order');
+
+  const settled = await settleCodPayment(orderId, actorUserId);
+  if (!settled) throw conflict('This payment is already settled.');
+  return settled;
 };
 
 /* ------------------------------------------------------------------ *

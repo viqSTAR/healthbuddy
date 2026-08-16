@@ -321,3 +321,25 @@ export const updateLabOrderStatusService = async (
 
   return updated;
 };
+
+/** The lab's own record. See `getMyPharmacyProfileService` for why this exists. */
+export const getMyLabProfileService = async (labPartnerId: string) =>
+  prisma.labPartner.findUniqueOrThrow({
+    where: { id: labPartnerId },
+    select: {
+      id: true,
+      name: true,
+      location: true,
+      address: true,
+      city: true,
+      state: true,
+      pincode: true,
+      homeCollection: true,
+      isActive: true,
+      labRegistrationNumber: true,
+      nablAccredited: true,
+      nablCertNumber: true,
+      nablExpiry: true,
+      verifiedAt: true,
+    },
+  });

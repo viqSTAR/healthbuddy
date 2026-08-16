@@ -3,8 +3,9 @@ import { prisma } from '../config/db.js';
 import { toNum } from '../utils/money.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
-import { refundForTargetService } from './paymentService.js';
+import { refundForTargetService, settleCodOnFinalDeliveryService } from './paymentService.js';
 import { consumeReservedStock, releaseReservedStock } from './stockService.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * A shipment is the unit a pharmacy actually works on.
@@ -191,6 +192,35 @@ export const updateShipmentStatusService = async (
             cancelReason ?? 'Part of your order was cancelled by the pharmacy.',
             { amount: toNum(shipment.subtotal), splitPayeeId: pharmacyId }
           );
+  }
+
+  /**
+   * The cash arrives when the last box does.
+   *
+   * A shop can only see its own parcel, so no shop can tell whether it just
+   * delivered the last one — the client used to try, and settled only orders
+   * that happened to have exactly one parcel. Every split cash order was
+   * therefore delivered in full and never marked paid, leaving both pharmacies
+   * unsettled against money the rider had already collected.
+   *
+   * Cancelled siblings count as finished: if one shop cancelled and the other
+   * delivered, nothing further is coming and what was collected is what is due.
+   */
+  if (status === 'DELIVERED') {
+    const stillComing = await prisma.shipment.count({
+      where: {
+        orderId: shipment.orderId,
+        status: { notIn: ['DELIVERED', 'CANCELLED'] },
+      },
+    });
+
+    if (stillComing === 0) {
+      // Never throws into a delivery: the parcel genuinely arrived, and a
+      // settlement problem must not make the shop think it did not.
+      await settleCodOnFinalDeliveryService(shipment.orderId).catch((err: unknown) =>
+        logger.error(`[cod] could not settle order ${shipment.orderId}`, err)
+      );
+    }
   }
 
   await syncOrderStatusService(shipment.orderId);

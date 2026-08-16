@@ -346,3 +346,241 @@ describe('settlement follows the goods', () => {
     );
   });
 });
+
+describe('cash is settled when the last parcel arrives', () => {
+  /**
+   * Puts two over-the-counter medicines on two different shelves.
+   *
+   * These tests walk parcels all the way to DELIVERED, and dispatch is refused
+   * for prescription-only stock with no prescription on file — a correct rule,
+   * tested elsewhere, that would stop this test before it reached the thing it
+   * is about. The seed happens to stock all its OTC lines at one shop, so
+   * rather than depend on that staying true, the split is arranged here: each
+   * shop is made the cheapest source of one OTC medicine, which is what routing
+   * picks on.
+   */
+  const otcFromDifferentShops = async (token: string) => {
+    const shops = await prisma.pharmacy.findMany({
+      where: { isActive: true, serviceAreas: { some: { pincode: SPLIT_PINCODE } } },
+      select: { id: true },
+      take: 2,
+    });
+    assert.equal(shops.length, 2, 'seed must serve this pincode from two shops');
+
+    const otc = await prisma.medicine.findMany({
+      where: { requiresPrescription: false },
+      select: { id: true },
+      take: 2,
+    });
+    assert.equal(otc.length, 2, 'seed data required — run `npm run seed`');
+
+    // Cheapest wins, so give each shop one clear win and one clear loss.
+    const stockAt = (pharmacyId: string, medicineId: string, price: number) =>
+      prisma.pharmacyInventory.upsert({
+        where: { pharmacyId_medicineId: { pharmacyId, medicineId } },
+        update: { price, stock: 500, reserved: 0, isActive: true },
+        create: { pharmacyId, medicineId, price, stock: 500, reorderLevel: 10 },
+      });
+
+    await Promise.all([
+      stockAt(shops[0]!.id, otc[0]!.id, 10),
+      stockAt(shops[1]!.id, otc[0]!.id, 90),
+      stockAt(shops[0]!.id, otc[1]!.id, 90),
+      stockAt(shops[1]!.id, otc[1]!.id, 10),
+    ]);
+
+    const res = await request(app)
+      .get('/api/v1/pharmacy/medicines')
+      .query({ pincode: SPLIT_PINCODE, limit: 100 })
+      .set(auth(token));
+    assert.equal(res.status, 200, res.text);
+
+    const priced = res.body.medicines as { id: string; soldBy: { id: string } | null }[];
+    const first = priced.find((m) => m.id === otc[0]!.id);
+    const other = priced.find((m) => m.id === otc[1]!.id);
+    assert.ok(first?.soldBy && other?.soldBy, 'both medicines must be sourceable');
+    assert.notEqual(first.soldBy.id, other.soldBy.id, 'the two lines must route to two shops');
+
+    return { first, other };
+  };
+
+  /** Walks one parcel to DELIVERED as the shop that owns it. */
+  const deliver = async (shipment: { id: string; pharmacyId: string }) => {
+    const owner = await prisma.pharmacy.findUniqueOrThrow({
+      where: { id: shipment.pharmacyId },
+      select: { user: { select: { phoneNumber: true } } },
+    });
+    const partner = await loginOnce(owner.user.phoneNumber);
+
+    for (const status of ['ACCEPTED', 'PROCESSING', 'DISPATCHED', 'DELIVERED']) {
+      const res = await request(app)
+        .patch(`/api/v1/pharmacy/shipments/${shipment.id}/status`)
+        .set(auth(partner.accessToken))
+        .send({ status });
+      assert.equal(res.status, 200, `${status}: ${res.text}`);
+    }
+  };
+
+  /**
+   * The regression this guards.
+   *
+   * Settlement used to be attempted by the partner app, guarded on the order
+   * having exactly one parcel — which is not the same as this being the last
+   * parcel. A cash order filled by two shops was delivered in full and never
+   * marked paid by anyone: the rider had the money, and both shops stayed
+   * unsettled against it.
+   */
+  test('a split cash order is only paid once every parcel has arrived', async () => {
+    const patient = await login();
+    const address = await saveAddress(patient.accessToken, SPLIT_PINCODE);
+    const { first, other } = await otcFromDifferentShops(patient.accessToken);
+
+    const placed = await request(app)
+      .post('/api/v1/pharmacy/orders')
+      .set(auth(patient.accessToken))
+      .send({
+        items: [
+          { medicineId: first.id, quantity: 1 },
+          { medicineId: other.id, quantity: 1 },
+        ],
+        addressId: address.id,
+      });
+    assert.equal(placed.status, 201, placed.text);
+    const order = placed.body.order;
+
+    const checkout = await request(app)
+      .post('/api/v1/payments/checkout')
+      .set(auth(patient.accessToken))
+      .send({ purpose: 'MEDICINE_ORDER', targetId: order.id, method: 'COD' });
+    assert.ok(checkout.status === 200 || checkout.status === 201, checkout.text);
+
+    const shipments = order.shipments as { id: string; pharmacyId: string }[];
+    assert.equal(shipments.length, 2, 'this test needs a split order');
+
+    const paymentState = async () =>
+      (
+        await prisma.payment.findUniqueOrThrow({
+          where: { id: checkout.body.paymentId },
+          select: { status: true, paidAt: true },
+        })
+      ).status;
+
+    assert.equal(await paymentState(), 'PENDING', 'nothing is collected before delivery');
+
+    await deliver(shipments[0]!);
+    assert.equal(
+      await paymentState(),
+      'PENDING',
+      'one parcel of two is not the whole order — the rider has not been everywhere yet'
+    );
+
+    await deliver(shipments[1]!);
+    assert.equal(await paymentState(), 'PAID', 'the last parcel settles the cash');
+
+    // And the shops are actually credited, not just the payment flipped.
+    const splits = await prisma.paymentSplit.findMany({
+      where: { paymentId: checkout.body.paymentId },
+      select: { status: true },
+    });
+    assert.ok(splits.length > 0);
+    assert.ok(
+      splits.every((s) => s.status === 'SETTLED'),
+      'every payee leg settles with the payment'
+    );
+  });
+
+  test('a cancelled sibling does not hold the cash open forever', async () => {
+    const patient = await login();
+    const address = await saveAddress(patient.accessToken, SPLIT_PINCODE);
+    const { first, other } = await otcFromDifferentShops(patient.accessToken);
+
+    const placed = await request(app)
+      .post('/api/v1/pharmacy/orders')
+      .set(auth(patient.accessToken))
+      .send({
+        items: [
+          { medicineId: first.id, quantity: 1 },
+          { medicineId: other.id, quantity: 1 },
+        ],
+        addressId: address.id,
+      });
+    assert.equal(placed.status, 201, placed.text);
+
+    const checkout = await request(app)
+      .post('/api/v1/payments/checkout')
+      .set(auth(patient.accessToken))
+      .send({ purpose: 'MEDICINE_ORDER', targetId: placed.body.order.id, method: 'COD' });
+    assert.ok(checkout.status === 200 || checkout.status === 201, checkout.text);
+
+    const shipments = placed.body.order.shipments as { id: string; pharmacyId: string }[];
+
+    // One shop cannot supply after all.
+    const dropped = shipments[1]!;
+    const owner = await prisma.pharmacy.findUniqueOrThrow({
+      where: { id: dropped.pharmacyId },
+      select: { user: { select: { phoneNumber: true } } },
+    });
+    const partner = await loginOnce(owner.user.phoneNumber);
+    const cancelled = await request(app)
+      .patch(`/api/v1/pharmacy/shipments/${dropped.id}/status`)
+      .set(auth(partner.accessToken))
+      .send({ status: 'CANCELLED', cancelReason: 'Out of stock' });
+    assert.equal(cancelled.status, 200, cancelled.text);
+
+    const paise = (v: unknown) => Math.round(Number(v) * 100);
+    const droppedSubtotal = (placed.body.order.shipments as { id: string; subtotal: unknown }[])
+      .find((s) => s.id === dropped.id)!.subtotal;
+    const originalPaise = paise(placed.body.order.totalAmount);
+
+    // The rider must not be sent to collect for goods nobody is sending.
+    const afterCancel = await prisma.payment.findUniqueOrThrow({
+      where: { id: checkout.body.paymentId },
+      select: { status: true, amount: true },
+    });
+    assert.equal(afterCancel.status, 'PENDING', 'the rest of the order is still coming');
+    assert.equal(
+      paise(afterCancel.amount),
+      originalPaise - paise(droppedSubtotal),
+      'what is owed at the door drops by exactly the cancelled parcel'
+    );
+
+    // Nothing more is coming, so delivering the survivor is the end of it.
+    await deliver(shipments[0]!);
+
+    const payment = await prisma.payment.findUniqueOrThrow({
+      where: { id: checkout.body.paymentId },
+      select: { status: true, amount: true },
+    });
+    assert.equal(
+      payment.status,
+      'PAID',
+      'a cancelled parcel is finished too — the order must not wait on it'
+    );
+
+    // The surviving shop is credited; the shop that dropped out is not.
+    const splits = await prisma.paymentSplit.findMany({
+      where: { paymentId: checkout.body.paymentId },
+      select: { payeeType: true, payeeId: true, amount: true, status: true },
+    });
+    const droppedLeg = splits.find(
+      (s) => s.payeeType === 'PHARMACY' && s.payeeId === dropped.pharmacyId
+    );
+    assert.equal(droppedLeg?.status, 'REVERSED', 'the shop that cancelled is not paid');
+    assert.ok(
+      splits.some(
+        (s) => s.payeeType === 'PHARMACY' && s.payeeId === shipments[0]!.pharmacyId && s.status === 'SETTLED'
+      ),
+      'the shop that delivered is paid'
+    );
+
+    // The invariant the whole split design rests on must survive a cancellation.
+    const legPaise = splits
+      .filter((s) => s.status !== 'REVERSED')
+      .reduce((total, s) => total + paise(s.amount), 0);
+    assert.equal(
+      legPaise,
+      paise(payment.amount),
+      `live legs ${legPaise}p must equal what was collected ${paise(payment.amount)}p`
+    );
+  });
+});

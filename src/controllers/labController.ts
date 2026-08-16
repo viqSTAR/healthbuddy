@@ -11,6 +11,7 @@ import {
   assignLabAgentService,
   attachLabReportService,
   updateLabOrderStatusService,
+  getMyLabProfileService,
 } from '../services/labService.js';
 import {
   asyncHandler,
@@ -101,5 +102,13 @@ export const updateLabOrderStatusHandler = asyncHandler(
     const { status } = req.body as { status: LabOrderStatus };
     const order = await updateLabOrderStatusService(id, labPartnerId, status);
     res.status(200).json({ success: true, order });
+  }
+);
+
+/** The signed-in lab's own record. */
+export const getMyLabProfileHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const lab = await getMyLabProfileService(requireLabPartnerId(req));
+    res.status(200).json({ success: true, lab });
   }
 );

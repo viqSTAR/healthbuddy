@@ -631,3 +631,35 @@ export const updateOrderStatusService = async (
 
   return updated;
 };
+
+/**
+ * The shop's own record, for the partner app's profile screen.
+ *
+ * That screen used to read the ProviderApplication instead, which is the form
+ * someone fills in to *ask* to be a partner — not the shop. A partner admitted
+ * any other way (the seed, or an admin provisioning them directly) has no
+ * application at all, so every field on the screen rendered as a dash while the
+ * real licence and address sat in this row.
+ *
+ * Payout account and commission are deliberately absent: they are the
+ * platform's side of the arrangement, not the shop's to read here.
+ */
+export const getMyPharmacyProfileService = async (pharmacyId: string) =>
+  prisma.pharmacy.findUniqueOrThrow({
+    where: { id: pharmacyId },
+    select: {
+      id: true,
+      name: true,
+      address: true,
+      city: true,
+      state: true,
+      pincode: true,
+      deliveryRadiusKm: true,
+      isActive: true,
+      drugLicenceNumber: true,
+      drugLicenceExpiry: true,
+      gstin: true,
+      pharmacistName: true,
+      verifiedAt: true,
+    },
+  });

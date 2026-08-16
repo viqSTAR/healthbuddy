@@ -9,6 +9,7 @@ import {
   acceptOrderService,
   assignOrderAgentService,
   updateOrderStatusService,
+  getMyPharmacyProfileService,
   type PlaceOrderInput,
 } from '../services/pharmacyService.js';
 import {
@@ -85,3 +86,11 @@ export const updateOrderStatusHandler = asyncHandler(async (req: AuthenticatedRe
   const order = await updateOrderStatusService(id, pharmacyId, status, cancelReason);
   res.status(200).json({ success: true, order });
 });
+
+/** The signed-in shop's own record. */
+export const getMyPharmacyProfileHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const pharmacy = await getMyPharmacyProfileService(requirePharmacyId(req));
+    res.status(200).json({ success: true, pharmacy });
+  }
+);

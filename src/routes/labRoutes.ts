@@ -6,6 +6,7 @@ import {
   getPatientLabOrdersHandler,
   getPatientLabOrderByIdHandler,
   getLabQueueHandler,
+  getMyLabProfileHandler,
   acceptLabOrderHandler,
   assignLabAgentHandler,
   attachLabReportHandler,
@@ -55,6 +56,9 @@ router.get(
   validate({ params: z.object({ id: uuidSchema }) }),
   getPatientLabOrderByIdHandler
 );
+
+/** The lab's own profile — its registration, accreditation and address. */
+router.get('/me', authorizeRoles('LAB_PARTNER'), getMyLabProfileHandler);
 
 // LAB_PARTNER-only: both of these were previously open to any logged-in user,
 // exposing all patients' lab orders and allowing forged reports.

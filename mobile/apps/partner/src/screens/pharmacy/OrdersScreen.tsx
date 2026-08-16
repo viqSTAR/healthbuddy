@@ -15,7 +15,6 @@ import {
   fetchShipmentQueue,
   Icon,
   Loading,
-  markCodCollected,
   radius,
   rupees,
   Screen,
@@ -52,19 +51,36 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   /**
    * Shipments, not orders. A basket can be filled by several shops, and this
    * shop is only responsible for — and only allowed to see — its own parcel.
+   *
+   * Fetched once, unfiltered, and narrowed below in memory. Re-fetching per
+   * chip made the three tiles count only what was on screen: filtering to
+   * Delivered showed "New 0" while parcels were sitting unaccepted, which is
+   * the one number a shop opens this screen to read.
    */
-  const queue = useAsync(() => fetchShipmentQueue(filter), [filter]);
+  const queue = useAsync(fetchShipmentQueue, []);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const counts = useMemo(() => {
-    const shipments = queue.data ?? [];
-    return {
-      open: shipments.filter((s) => s.status === 'PLACED').length,
-      active: shipments.filter((s) => ['ACCEPTED', 'PROCESSING', 'DISPATCHED'].includes(s.status))
-        .length,
-      delivered: shipments.filter((s) => s.status === 'DELIVERED').length,
-    };
-  }, [queue.data]);
+  const all = useMemo(() => queue.data ?? [], [queue.data]);
+
+  const counts = useMemo(
+    () => ({
+      open: all.filter((s) => s.status === 'PLACED').length,
+      active: all.filter((s) => ['ACCEPTED', 'PROCESSING', 'DISPATCHED'].includes(s.status)).length,
+      delivered: all.filter((s) => s.status === 'DELIVERED').length,
+    }),
+    [all]
+  );
+
+  const shipments = useMemo(
+    () => (filter ? all.filter((s) => s.status === filter) : all),
+    [all, filter]
+  );
+
+  /** What still needs doing — a delivered parcel is not "to fulfil". */
+  const outstanding = useMemo(
+    () => shipments.filter((s) => s.status !== 'DELIVERED' && s.status !== 'CANCELLED').length,
+    [shipments]
+  );
 
   const accept = async (shipment: PharmacyShipment) => {
     setBusyId(shipment.id);
@@ -84,18 +100,16 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const advance = async (shipment: PharmacyShipment, status: OrderStatus) => {
     setBusyId(shipment.id);
     try {
+      /*
+        Cash settlement is the server's to do, not this screen's.
+
+        This used to call markCodCollected itself, guarded on the order having
+        exactly one parcel — which is not the same as this being the last
+        parcel. Split cash orders were delivered in full and never settled by
+        anyone. The server now settles when the last parcel lands, which is the
+        only place that can see all of them.
+      */
       await updateShipmentStatus(shipment.id, status);
-      // Marking a cash order delivered is also the moment the money arrived, so
-      // settle it in the same step rather than leaving a debt open that someone
-      // has to remember to clear. Only on the last parcel — the rider collects
-      // the whole order's cash once, not once per box.
-      if (
-        status === 'DELIVERED' &&
-        shipment.order.payment?.method === 'COD' &&
-        shipment.order.shipmentCount === 1
-      ) {
-        await markCodCollected(shipment.order.id).catch(() => undefined);
-      }
       queue.reload();
     } catch (err) {
       Alert.alert('Could not update', errorMessage(err));
@@ -106,8 +120,6 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
 
   if (queue.loading) return <Loading label="Loading orders" />;
   if (queue.error) return <ErrorState message={queue.error} onRetry={queue.reload} />;
-
-  const shipments = queue.data ?? [];
 
   return (
     <Screen scroll refreshing={queue.refreshing} onRefresh={queue.refresh}>
@@ -130,13 +142,19 @@ export const OrdersScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         ))}
       </ChipRow>
 
-      <SectionHeader title={`To fulfil (${shipments.length})`} />
+      <SectionHeader
+        title={filter ? `Showing (${shipments.length})` : `To fulfil (${outstanding})`}
+      />
 
       {shipments.length === 0 ? (
         <EmptyState
           icon="inbox"
-          title="Nothing to fulfil"
-          message="Parcels routed to this pharmacy will appear here as soon as they are placed."
+          title={filter ? 'Nothing here' : 'Nothing to fulfil'}
+          message={
+            filter
+              ? 'No parcels of this shop are in that state right now.'
+              : 'Parcels routed to this pharmacy will appear here as soon as they are placed.'
+          }
         />
       ) : (
         <View style={styles.list}>

@@ -703,6 +703,50 @@ export interface PharmacyShipment extends Shipment {
  * Prefer this over `fetchPharmacyQueue`: an order can span several shops, and
  * this returns only the parcel this one is responsible for.
  */
+/**
+ * The shop's own record.
+ *
+ * Not the ProviderApplication — that is the form used to ask to become a
+ * partner, and a shop admitted any other way never has one.
+ */
+export interface MyPharmacy {
+  id: string;
+  name: string;
+  address: string;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  deliveryRadiusKm: number;
+  isActive: boolean;
+  drugLicenceNumber: string | null;
+  drugLicenceExpiry: string | null;
+  gstin: string | null;
+  pharmacistName: string | null;
+  verifiedAt: string | null;
+}
+
+export const fetchMyPharmacy = async () =>
+  (await api.get<{ pharmacy: MyPharmacy }>('/pharmacy/me')).data.pharmacy;
+
+export interface MyLab {
+  id: string;
+  name: string;
+  location: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  homeCollection: boolean;
+  isActive: boolean;
+  labRegistrationNumber: string | null;
+  nablAccredited: boolean;
+  nablCertNumber: string | null;
+  nablExpiry: string | null;
+  verifiedAt: string | null;
+}
+
+export const fetchMyLab = async () => (await api.get<{ lab: MyLab }>('/labs/me')).data.lab;
+
 export const fetchShipmentQueue = async (status?: OrderStatus) =>
   (await api.get<{ shipments: PharmacyShipment[] }>('/pharmacy/shipments', { params: { status } }))
     .data.shipments;
