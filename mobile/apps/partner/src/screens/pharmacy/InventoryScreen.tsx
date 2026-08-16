@@ -572,7 +572,7 @@ const StockSheet: React.FC<{
             <SectionHeader title="Listing" />
             <Card style={styles.form}>
               <Input
-                label={`Your price (₹) · MRP ₹${item.medicine.price}`}
+                label={`Your price (₹) · MRP ${rupees(item.medicine.price)}`}
                 icon="payments"
                 value={price}
                 onChangeText={setPrice}
