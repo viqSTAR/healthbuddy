@@ -63,6 +63,31 @@ const VerifiedArea: React.FC = () => {
 
   if (gate === 'loading') return <Splash />;
 
+  /**
+   * The role is the answer. An application is only how one is usually asked for.
+   *
+   * `gate` resolves to `approved` straight from the server-issued role and
+   * deliberately does not load an application in that case — there is nothing
+   * left to decide. This then required one anyway, so every doctor whose role
+   * was granted directly rather than through the application queue was sent
+   * back to "Register your practice" and could never reach their dashboard:
+   * an admin provisioning a doctor via provisionRoleService creates the Doctor
+   * row and the role but no application, and so does the seed. All six seeded
+   * doctors were locked out of an app they are verified to use, while every
+   * endpoint behind it would have served them.
+   */
+  if (gate === 'approved') {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Tabs" component={DoctorTabs} />
+        <Stack.Screen name="Consultation" component={ConsultationScreen} />
+        <Stack.Screen name="Prescribe" component={PrescribeScreen} />
+        <Stack.Screen name="Notifications" component={NotificationsScreen} />
+        <Stack.Screen name="Earnings" component={EarningsScreen} />
+      </Stack.Navigator>
+    );
+  }
+
   if (gate === 'unregistered' || !application) {
     return <DoctorRegistrationScreen onSubmitted={() => void reload()} />;
   }
