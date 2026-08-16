@@ -229,6 +229,31 @@ const envSchema = z
           message: 'SMS_PROVIDER cannot be "mock" in production — no OTP would ever be delivered.',
         });
       }
+      /**
+       * msg91 is selectable but has no implementation behind it — sendSMS
+       * logs and returns false. Refused for the same reason as "mock" rather
+       * than for a different one: the failure is identical, nobody can sign
+       * in, and it would otherwise pass validation and fail silently at the
+       * first login attempt instead of loudly at boot.
+       */
+      if (cfg.SMS_PROVIDER === 'msg91') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['SMS_PROVIDER'],
+          message:
+            'SMS_PROVIDER=msg91 has no implementation yet — sendSMS returns false, so no OTP is delivered and nobody can sign in. Use twilio, or implement sendViaMsg91 in src/utils/smsService.ts first.',
+        });
+      }
+      if (cfg.SMS_PROVIDER === 'twilio') {
+        if (!cfg.TWILIO_ACCOUNT_SID || !cfg.TWILIO_AUTH_TOKEN || !cfg.TWILIO_PHONE_NUMBER) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['TWILIO_ACCOUNT_SID'],
+            message:
+              'TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER are all required when SMS_PROVIDER=twilio.',
+          });
+        }
+      }
       if (cfg.PAYMENT_PROVIDER === 'mock') {
         ctx.addIssue({
           code: 'custom',
