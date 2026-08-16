@@ -2,7 +2,13 @@ import jwt, { type SignOptions } from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
 
-export type Role = 'PATIENT' | 'DOCTOR' | 'LAB_PARTNER' | 'PHARMACY' | 'ADMIN';
+export type Role =
+  | 'PATIENT'
+  | 'DOCTOR'
+  | 'LAB_PARTNER'
+  | 'PHARMACY'
+  | 'DELIVERY_AGENT'
+  | 'ADMIN';
 
 /**
  * Claims carried by an access token. Profile ids are resolved server-side at
@@ -16,6 +22,8 @@ export interface JwtPayload {
   doctorId?: string;
   labPartnerId?: string;
   pharmacyId?: string;
+  /// The rider/collector profile, when this account has one.
+  agentId?: string;
 }
 
 /** `typ` separates the two token classes so a refresh token cannot authenticate a request. */

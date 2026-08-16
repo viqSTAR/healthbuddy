@@ -55,7 +55,7 @@ export const requestOtpService = async (rawPhone: string) => {
 const loadOrRegisterUser = async (phoneNumber: string) => {
   const existing = await prisma.user.findUnique({
     where: { phoneNumber },
-    include: { patient: true, doctor: true, labPartner: true, pharmacy: true },
+    include: { patient: true, doctor: true, labPartner: true, pharmacy: true, agent: true },
   });
 
   if (existing) return existing;
@@ -66,7 +66,7 @@ const loadOrRegisterUser = async (phoneNumber: string) => {
       role: 'PATIENT',
       patient: { create: { fullName: 'Health Buddy User' } },
     },
-    include: { patient: true, doctor: true, labPartner: true, pharmacy: true },
+    include: { patient: true, doctor: true, labPartner: true, pharmacy: true, agent: true },
   });
 };
 
@@ -80,6 +80,7 @@ const toTokenPayload = (user: LoadedUser): JwtPayload => ({
   ...(user.doctor ? { doctorId: user.doctor.id } : {}),
   ...(user.labPartner ? { labPartnerId: user.labPartner.id } : {}),
   ...(user.pharmacy ? { pharmacyId: user.pharmacy.id } : {}),
+  ...(user.agent ? { agentId: user.agent.id } : {}),
 });
 
 const toPublicUser = (user: LoadedUser) => ({
@@ -91,6 +92,7 @@ const toPublicUser = (user: LoadedUser) => ({
     user.doctor?.name ??
     user.labPartner?.name ??
     user.pharmacy?.name ??
+    user.agent?.name ??
     null,
 });
 
@@ -135,7 +137,7 @@ export const refreshTokensService = async (refreshToken: string) => {
 
   const user = await prisma.user.findUnique({
     where: { id: claims.userId },
-    include: { patient: true, doctor: true, labPartner: true, pharmacy: true },
+    include: { patient: true, doctor: true, labPartner: true, pharmacy: true, agent: true },
   });
 
   if (!user) throw new AppError('Account no longer exists.', 401);
@@ -185,6 +187,19 @@ export const provisionRoleService = async (
           where: { userId: user.id },
           update: { name: profile.name, location: profile.location ?? '' },
           create: { userId: user.id, name: profile.name, location: profile.location ?? '' },
+        });
+        break;
+      /**
+       * Provisioned by an admin is provisioned verified — the same as every
+       * other provider here. An agent who signs themselves up through the app
+       * is created unverified instead, and cannot take a job until someone has
+       * checked them, because taking a job is what reveals a patient's address.
+       */
+      case 'DELIVERY_AGENT':
+        await tx.deliveryAgent.upsert({
+          where: { userId: user.id },
+          update: { name: profile.name, verifiedAt: new Date() },
+          create: { userId: user.id, name: profile.name, verifiedAt: new Date() },
         });
         break;
       case 'ADMIN':

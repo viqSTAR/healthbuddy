@@ -77,6 +77,12 @@ export const requireLabPartnerId = (req: AuthenticatedRequest): string => {
   return user.labPartnerId;
 };
 
+export const requireAgentId = (req: AuthenticatedRequest): string => {
+  const user = requireUser(req);
+  if (!user.agentId) throw forbidden('This action requires a delivery agent profile.');
+  return user.agentId;
+};
+
 /** Wraps an async handler so rejected promises reach the error middleware. */
 export const asyncHandler =
   <T extends AuthenticatedRequest>(fn: (req: T, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler =>

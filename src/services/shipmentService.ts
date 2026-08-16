@@ -269,6 +269,15 @@ export const syncOrderStatusService = async (orderId: string) => {
   });
 };
 
+/**
+ * Hands a parcel to a rider.
+ *
+ * The user id is checked against the agent roster before it is written. It
+ * used to be stored as given, which meant a shop could name any account on the
+ * platform — a patient, a rival shop — and, now that agents can read the jobs
+ * assigned to them, that would have handed a stranger the customer's name,
+ * phone number and door number.
+ */
 export const assignShipmentAgentService = async (
   shipmentId: string,
   pharmacyId: string,
@@ -279,6 +288,15 @@ export const assignShipmentAgentService = async (
     select: { id: true },
   });
   if (!shipment) throw notFound('Shipment');
+
+  if (agentUserId) {
+    const agent = await prisma.deliveryAgent.findUnique({
+      where: { userId: agentUserId },
+      select: { isActive: true },
+    });
+    if (!agent) throw new AppError('That account is not a delivery agent.', 422);
+    if (!agent.isActive) throw new AppError('That agent is not active.', 422);
+  }
 
   return prisma.shipment.update({
     where: { id: shipmentId },

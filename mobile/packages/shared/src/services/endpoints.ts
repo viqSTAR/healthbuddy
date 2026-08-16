@@ -3,8 +3,14 @@ import { api, API_BASE_URL } from './api';
 
 /* ---------- Shared shapes (mirror the backend response contracts) ---------- */
 
-export type Role = 'PATIENT' | 'DOCTOR' | 'LAB_PARTNER' | 'PHARMACY' | 'ADMIN';
-export type AppId = 'PATIENT' | 'DOCTOR' | 'PARTNER' | 'ADMIN';
+export type Role =
+  | 'PATIENT'
+  | 'DOCTOR'
+  | 'LAB_PARTNER'
+  | 'PHARMACY'
+  | 'DELIVERY_AGENT'
+  | 'ADMIN';
+export type AppId = 'PATIENT' | 'DOCTOR' | 'PARTNER' | 'AGENT' | 'ADMIN';
 
 export type DrugSchedule = 'OTC' | 'SCHEDULE_H' | 'SCHEDULE_H1' | 'SCHEDULE_X' | 'NARCOTIC';
 export type TeleDrugList = 'LIST_O' | 'LIST_A' | 'LIST_B' | 'PROHIBITED';
@@ -1682,6 +1688,131 @@ export const markChatThreadRead = async (threadId: string) =>
 export const setChatThreadOpen = async (threadId: string, open: boolean) =>
   (await api.patch<{ thread: ChatThreadSummary }>(`/chat/threads/${threadId}/state`, { open })).data
     .thread;
+
+/* ---------- Delivery agents ----------
+ *
+ * Two kinds of work, two routes. A sealed parcel sits in an open pool anyone
+ * verified can take; a sample collection is handed out by the lab that trained
+ * the collector and never appears in the pool.
+ */
+
+export interface AgentProfile {
+  id: string;
+  name: string;
+  vehicleNumber: string | null;
+  isActive: boolean;
+  /** On shift. Distinct from being suspended. */
+  isAvailable: boolean;
+  verifiedAt: string | null;
+  labPartner: { id: string; name: string } | null;
+  /** Pincodes this agent will travel to. */
+  serviceAreas: string[];
+}
+
+/**
+ * A parcel nobody has taken yet.
+ *
+ * Carries no patient: the name, phone and street address arrive only once the
+ * job is claimed, so the pool cannot be read as a list of who is expecting
+ * medicine and where they live.
+ */
+export interface AvailableJob {
+  id: string;
+  parcelValue: number;
+  itemCount: number;
+  express: boolean;
+  waitingSince: string;
+  collectFrom: { name: string; address: string; city: string | null; pincode: string | null };
+  deliverToPincode: string | null;
+  partOfSplitOrder: boolean;
+  cashToCollect: number | null;
+}
+
+export interface AgentJob {
+  id: string;
+  status: OrderStatus;
+  subtotal: number;
+  speed: DeliverySpeed;
+  items: OrderItem[];
+  createdAt: string;
+  dispatchedAt: string | null;
+  deliveredAt: string | null;
+  pharmacy: { name: string; address: string; city: string | null; pincode: string | null };
+  order: {
+    id: string;
+    address: string;
+    pincode: string | null;
+    patientName: string | null;
+    patientPhone: string;
+    shipmentCount: number;
+    payment: { method: string; status: string; amount: number } | null;
+  };
+  /** What to ask for at the door, or null when it is already paid. */
+  cashToCollect: number | null;
+}
+
+export interface AgentPickup {
+  id: string;
+  status: 'ACCEPTED' | 'SAMPLE_COLLECTED';
+  testName: string;
+  scheduledAt: string | null;
+  address: string | null;
+  pincode: string | null;
+  patientName: string | null;
+  patientPhone: string;
+  labPartner: { name: string; address: string | null } | null;
+}
+
+export const registerAgent = async (payload: {
+  name: string;
+  vehicleNumber?: string;
+  pincodes: string[];
+}) => (await api.post<{ agent: AgentProfile }>('/agent/register', payload)).data.agent;
+
+export const fetchMyAgentProfile = async () =>
+  (await api.get<{ agent: AgentProfile }>('/agent/me')).data.agent;
+
+export const updateMyAgentProfile = async (payload: {
+  name?: string;
+  vehicleNumber?: string;
+  isAvailable?: boolean;
+  pincodes?: string[];
+}) => (await api.patch<{ agent: AgentProfile }>('/agent/me', payload)).data.agent;
+
+export const fetchAvailableJobs = async () =>
+  (await api.get<{ jobs: AvailableJob[] }>('/agent/jobs/available')).data.jobs;
+
+export const claimJob = async (id: string) =>
+  (await api.post<{ job: AgentJob }>(`/agent/jobs/${id}/claim`)).data.job;
+
+export const releaseJob = async (id: string) =>
+  (await api.post<{ released: boolean }>(`/agent/jobs/${id}/release`)).data;
+
+export const fetchMyJobs = async () =>
+  (await api.get<{ deliveries: AgentJob[]; pickups: AgentPickup[] }>('/agent/jobs/mine')).data;
+
+export const fetchAgentJob = async (id: string) =>
+  (await api.get<{ job: AgentJob }>(`/agent/jobs/${id}`)).data.job;
+
+/** `codCollected` is required by the server before a cash order can be delivered. */
+export const updateAgentJobStatus = async (
+  id: string,
+  status: 'DISPATCHED' | 'DELIVERED',
+  codCollected?: boolean
+) =>
+  (
+    await api.patch<{ job: unknown }>(`/agent/jobs/${id}/status`, {
+      status,
+      ...(codCollected === undefined ? {} : { codCollected }),
+    })
+  ).data;
+
+export const markSampleCollected = async (id: string) =>
+  (
+    await api.patch<{ pickup: { id: string; status: string } }>(`/agent/pickups/${id}/status`, {
+      status: 'SAMPLE_COLLECTED',
+    })
+  ).data.pickup;
 
 /* ---------- Health content & emergency directory ---------- */
 

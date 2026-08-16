@@ -2,7 +2,7 @@
   "name": "healthbuddy-mobile",
   "private": true,
   "version": "1.0.0",
-  "description": "Health Buddy client apps — patient, doctor and partner — over a shared design system and API client.",
+  "description": "Health Buddy client apps — patient, doctor, partner and agent — over a shared design system and API client.",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -11,9 +11,10 @@
     "patient": "npm start --workspace @healthbuddy/patient",
     "doctor": "npm start --workspace @healthbuddy/doctor",
     "partner": "npm start --workspace @healthbuddy/partner",
+    "agent": "npm start --workspace @healthbuddy/agent",
 
-    "all": "concurrently -n patient,doctor,partner -c green,blue,magenta \"npm:patient\" \"npm:doctor\" \"npm:partner\"",
-    "all:web": "concurrently -n patient,doctor,partner -c green,blue,magenta \"npm:web --workspace @healthbuddy/patient\" \"npm:web --workspace @healthbuddy/doctor\" \"npm:web --workspace @healthbuddy/partner\"",
+    "all": "concurrently -n patient,doctor,partner,agent -c green,blue,magenta,cyan \"npm:patient\" \"npm:doctor\" \"npm:partner\" \"npm:agent\"",
+    "all:web": "concurrently -n patient,doctor,partner,agent -c green,blue,magenta,cyan \"npm:web --workspace @healthbuddy/patient\" \"npm:web --workspace @healthbuddy/doctor\" \"npm:web --workspace @healthbuddy/partner\" \"npm:web --workspace @healthbuddy/agent\"",
 
     "typecheck": "npm run typecheck --workspaces --if-present",
     "doctor:all": "npm run doctor --workspaces --if-present"

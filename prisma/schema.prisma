@@ -34,6 +34,11 @@ enum Role {
   DOCTOR
   LAB_PARTNER
   PHARMACY
+  /// Carries parcels and collects samples. One role for both, because the same
+  /// person often does both jobs — what separates them is entitlement, not
+  /// identity: anyone verified may carry a sealed parcel, but only a collector
+  /// employed by a lab may take a sample, which is a clinical act.
+  DELIVERY_AGENT
   ADMIN
 }
 
@@ -157,6 +162,8 @@ enum AppId {
   PATIENT
   DOCTOR
   PARTNER
+  /// Riders and sample collectors.
+  AGENT
   ADMIN
 }
 
@@ -336,6 +343,7 @@ model User {
   doctor     Doctor?
   labPartner LabPartner?
   pharmacy   Pharmacy?
+  agent      DeliveryAgent?
 
   applications         ProviderApplication[] @relation("ApplicationApplicant")
   reviewedApplications ProviderApplication[] @relation("ApplicationReviewer")
@@ -589,8 +597,61 @@ model LabPartner {
 
   labOrders LabOrder[]
   offerings LabOffering[]
+  collectors DeliveryAgent[]
 
   @@index([isActive])
+}
+
+/// Someone who carries parcels and collects samples.
+///
+/// The two jobs are deliberately not two roles. A sealed medicine parcel is
+/// commodity logistics — any verified agent may carry one, and those jobs sit
+/// in an open pool. Drawing a sample is a clinical act, so a collector belongs
+/// to the lab that trained them and only that lab may hand them work. One
+/// person can be both; `labPartnerId` is what says whether they are.
+model DeliveryAgent {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name          String
+  vehicleNumber String?
+  /// Photo-ID reference held for the record. Never returned to a client.
+  idProofNumber String?
+
+  /// The lab this collector works for, when they collect samples at all.
+  labPartnerId String?
+  labPartner   LabPartner? @relation(fields: [labPartnerId], references: [id], onDelete: SetNull)
+
+  isActive Boolean @default(true)
+  /// On shift. A rider who has finished for the day stops being offered work,
+  /// which is a different thing from being suspended.
+  isAvailable Boolean   @default(false)
+  verifiedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  serviceAreas DeliveryAgentArea[]
+
+  @@index([isActive, isAvailable])
+  @@index([labPartnerId])
+}
+
+/// A pincode an agent will travel to.
+///
+/// Declared rather than inferred from a position, for the same reason a
+/// pharmacy's service area is: a straight-line distance says nothing about
+/// whether someone is willing to make the trip.
+model DeliveryAgentArea {
+  id      String        @id @default(uuid())
+  agentId String
+  agent   DeliveryAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  pincode String
+  createdAt DateTime @default(now())
+
+  @@unique([agentId, pincode])
+  @@index([pincode])
 }
 
 /// A request to become a provider. Submitting one grants nothing — an admin

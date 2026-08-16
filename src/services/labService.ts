@@ -205,6 +205,26 @@ export const assignLabAgentService = async (
   });
   if (!order || order.labPartnerId !== labPartnerId) throw notFound('Lab order');
 
+  /**
+   * Only this lab's own collectors.
+   *
+   * Taking a sample is a clinical act, not a courier run: the person doing it
+   * has to be someone this lab trained and stands behind. The id used to be
+   * written unchecked, so any account at all could be named — and would then
+   * have been shown the patient's address and phone.
+   */
+  if (agentUserId) {
+    const agent = await prisma.deliveryAgent.findUnique({
+      where: { userId: agentUserId },
+      select: { isActive: true, labPartnerId: true },
+    });
+    if (!agent) throw new AppError('That account is not a collection agent.', 422);
+    if (!agent.isActive) throw new AppError('That agent is not active.', 422);
+    if (agent.labPartnerId !== labPartnerId) {
+      throw new AppError('That agent does not collect for this lab.', 403);
+    }
+  }
+
   return prisma.labOrder.update({
     where: { id: orderId },
     data: {
