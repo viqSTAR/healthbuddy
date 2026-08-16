@@ -6,19 +6,33 @@ import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
  */
 export const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/+$/, '');
 
-const ACCESS_KEY = 'hb.admin.accessToken';
-const REFRESH_KEY = 'hb.admin.refreshToken';
+/**
+ * Tokens are no longer written to localStorage.
+ *
+ * Both used to live there, where any script on the page can read them — and the
+ * refresh token is a seven-day key to an account that can read every patient
+ * record on the platform. One XSS, in the panel or in anything it imports, and
+ * that key walks out; the access token expiring in fifteen minutes is no help
+ * when the thief can mint a new one all week.
+ *
+ * The refresh token is now an httpOnly cookie the server sets, which JavaScript
+ * cannot read at all. The access token stays in a module variable: an XSS can
+ * still use it while the tab is open, which is unavoidable for a token the app
+ * has to attach to requests, but it dies on reload and takes nothing with it.
+ *
+ * The cost is that a refresh happens on load rather than reading a stored
+ * token — one extra round trip, in exchange for the long-lived credential
+ * never being reachable from script.
+ */
+let accessToken: string | null = null;
 
 export const tokens = {
-  access: () => localStorage.getItem(ACCESS_KEY),
-  refresh: () => localStorage.getItem(REFRESH_KEY),
-  save(access: string, refresh: string) {
-    localStorage.setItem(ACCESS_KEY, access);
-    localStorage.setItem(REFRESH_KEY, refresh);
+  access: () => accessToken,
+  save(access: string) {
+    accessToken = access;
   },
   clear() {
-    localStorage.removeItem(ACCESS_KEY);
-    localStorage.removeItem(REFRESH_KEY);
+    accessToken = null;
   },
 };
 
@@ -26,6 +40,8 @@ export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 20000,
   headers: { 'Content-Type': 'application/json' },
+  // Sends the httpOnly refresh cookie on the auth calls that need it.
+  withCredentials: true,
 });
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
@@ -41,20 +57,28 @@ export const setSessionExpiredHandler = (fn: (() => void) | null) => {
 
 let refreshInFlight: Promise<string | null> | null = null;
 
+/**
+ * No token is sent: the browser attaches the httpOnly cookie itself, which is
+ * the point — the panel cannot read the credential it authenticates with.
+ */
 const refreshAccessToken = async (): Promise<string | null> => {
-  const refreshToken = tokens.refresh();
-  if (!refreshToken) return null;
-
   try {
     // Bare axios — using `api` would recurse through this interceptor.
-    const res = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken });
-    tokens.save(res.data.tokens.accessToken, res.data.tokens.refreshToken);
+    const res = await axios.post(
+      `${API_BASE_URL}/auth/refresh`,
+      {},
+      { withCredentials: true }
+    );
+    tokens.save(res.data.tokens.accessToken);
     return res.data.tokens.accessToken as string;
   } catch {
     tokens.clear();
     return null;
   }
 };
+
+/** Restores a session on page load from the cookie alone. */
+export const restoreSession = refreshAccessToken;
 
 api.interceptors.response.use(
   (response) => response,

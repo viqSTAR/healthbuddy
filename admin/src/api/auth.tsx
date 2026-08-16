@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { setSessionExpiredHandler, tokens } from './client';
-import { refreshSession, sendOtp, verifyOtp, type Role } from './endpoints';
+import { refreshSession, sendOtp, verifyOtp, endSession, type Role } from './endpoints';
 
 export interface AdminUser {
   id: string;
@@ -29,24 +29,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [devOtp, setDevOtp] = useState<string | null>(null);
 
   const signOut = useCallback(() => {
+    // Ask the server to drop the cookie too — clearing only the in-memory
+    // token would leave a working refresh credential in the browser.
+    void endSession().catch(() => undefined);
     tokens.clear();
     setUser(null);
     setPendingPhone(null);
     setDevOtp(null);
   }, []);
 
+  /**
+   * A session is restored by asking, not by reading.
+   *
+   * There is no stored token to check any more — the refresh credential is an
+   * httpOnly cookie this code cannot see. So every load attempts a refresh and
+   * treats failure as "not signed in". One round trip on load, in exchange for
+   * the long-lived credential being unreachable from script.
+   */
   useEffect(() => {
-    const refreshToken = tokens.refresh();
-    if (!refreshToken) {
-      setBootstrapping(false);
-      return;
-    }
-
     let cancelled = false;
     (async () => {
       try {
-        const res = await refreshSession(refreshToken);
-        tokens.save(res.tokens.accessToken, res.tokens.refreshToken);
+        const res = await refreshSession();
         if (!cancelled) setUser(res.user);
       } catch {
         tokens.clear();
@@ -76,7 +80,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!pendingPhone) throw new Error('No verification in progress.');
 
       const res = await verifyOtp(pendingPhone, otp);
-      tokens.save(res.tokens.accessToken, res.tokens.refreshToken);
+      // Only the access token is held, and only in memory.
+      tokens.save(res.tokens.accessToken);
       setUser(res.user);
       setPendingPhone(null);
       setDevOtp(null);

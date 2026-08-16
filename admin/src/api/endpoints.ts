@@ -128,13 +128,17 @@ export const verifyOtp = async (phoneNumber: string, otp: string) =>
     }>('/auth/verify-otp', { phoneNumber, otp })
   ).data;
 
-export const refreshSession = async (refreshToken: string) =>
+/** No argument: the browser sends the httpOnly refresh cookie itself. */
+export const refreshSession = async () =>
   (
     await api.post<{
       user: { id: string; phoneNumber: string; role: Role; fullName: string | null };
       tokens: { accessToken: string; refreshToken: string };
-    }>('/auth/refresh', { refreshToken })
+    }>('/auth/refresh', {})
   ).data;
+
+/** Drops the refresh cookie server-side; the access token is discarded locally. */
+export const endSession = async () => (await api.post('/auth/logout', {})).data;
 
 /* ---------- Stats ---------- */
 

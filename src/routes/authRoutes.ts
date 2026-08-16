@@ -4,6 +4,7 @@ import {
   requestOtpHandler,
   verifyOtpHandler,
   refreshTokenHandler,
+  logoutHandler,
   provisionRoleHandler,
 } from '../controllers/authController.js';
 import { otpRateLimiter, otpVerifyRateLimiter } from '../middlewares/rateLimiter.js';
@@ -29,9 +30,13 @@ router.post(
 
 router.post(
   '/refresh',
-  validate({ body: z.object({ refreshToken: z.string().min(1, 'refreshToken is required.') }) }),
+  // Optional in the body: a browser sends it as an httpOnly cookie instead,
+  // and the handler refuses when neither is present.
+  validate({ body: z.object({ refreshToken: z.string().min(1).optional() }) }),
   refreshTokenHandler
 );
+
+router.post('/logout', logoutHandler);
 
 // Elevated roles can only be created by an existing administrator.
 router.post(
