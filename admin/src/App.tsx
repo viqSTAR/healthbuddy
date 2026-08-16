@@ -11,6 +11,7 @@ import { Users } from './pages/Users';
 import { Patients } from './pages/Patients';
 import { Doctors } from './pages/Doctors';
 import { Pharmacies } from './pages/Pharmacies';
+import { Agents } from './pages/Agents';
 import { Labs } from './pages/Labs';
 import { Appointments } from './pages/Appointments';
 import { Orders } from './pages/Orders';
@@ -73,6 +74,7 @@ const Sidebar: React.FC = () => {
         { to: '/doctors', label: 'Doctors' },
         { to: '/pharmacies', label: 'Pharmacies' },
         { to: '/labs', label: 'Labs' },
+        { to: '/agents', label: 'Delivery agents' },
         { to: '/users', label: 'All accounts' },
       ],
     },
@@ -179,6 +181,7 @@ const Shell: React.FC = () => (
         <Route path="/doctors" element={<Doctors />} />
         <Route path="/pharmacies" element={<Pharmacies />} />
         <Route path="/labs" element={<Labs />} />
+        <Route path="/agents" element={<Agents />} />
         <Route path="/users" element={<Users />} />
 
         <Route path="/appointments" element={<Appointments />} />

@@ -9,6 +9,8 @@ import {
   listPharmaciesService,
   getPharmacyService,
   updatePharmacyService,
+  listAgentsService,
+  updateAgentService,
   getPharmacyInventoryService,
   listLabsService,
   getLabService,
@@ -423,3 +425,33 @@ export const upsertLabPackageHandler = asyncHandler(
     res.status(id ? 200 : 201).json({ success: true, labPackage });
   }
 );
+
+/* ---------- Delivery agents ---------- */
+
+export const listAgentRosterHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const query = q(req);
+  ok(
+    res,
+    await listAgentsService({
+      page: query.page,
+      limit: query.limit,
+      ...(pick(query, ['search', 'state']) as { search?: string }),
+    })
+  );
+});
+
+export const updateAgentHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const actor = requireUser(req);
+  const { id } = req.params as { id: string };
+  const { reason, ...patch } = req.body as { reason?: string } & Record<string, unknown>;
+
+  const agent = await updateAgentService({
+    actorUserId: actor.userId,
+    id,
+    patch,
+    ...(reason ? { reason } : {}),
+    ipAddress: req.ip ?? null,
+  });
+
+  ok(res, { agent });
+});

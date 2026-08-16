@@ -7,6 +7,36 @@ import {
 
 const prisma = new PrismaClient();
 
+/**
+ * Refuses to run against a production database.
+ *
+ * This file creates practitioners who are verified, hold council registration
+ * numbers and can be booked — and pharmacies holding drug licence numbers that
+ * were invented here. On a live platform those are not sample rows, they are
+ * fake clinicians a real patient could book a real consultation with, and fake
+ * licences behind real medicine. There was nothing stopping `npm run seed`
+ * being pointed at production by a tired hand or a misconfigured CI step.
+ *
+ * `SEED_FORCE=true` exists because restoring a demo environment that happens to
+ * run with NODE_ENV=production is a legitimate thing to want. It has to be
+ * typed deliberately.
+ */
+const assertNotProduction = () => {
+  if (process.env.NODE_ENV !== 'production' || process.env.SEED_FORCE === 'true') return;
+
+  console.error(
+    '\n[REFUSED] Seeding a production database.\n\n' +
+      '  This creates verified doctors with invented council numbers and\n' +
+      '  pharmacies with invented drug licences. On a live platform a patient\n' +
+      '  could book one of them.\n\n' +
+      '  If you really mean it (restoring a demo environment), re-run with:\n' +
+      '    SEED_FORCE=true npm run seed\n'
+  );
+  process.exit(1);
+};
+
+assertNotProduction();
+
 const DOCTORS = [
   { phone: '+15551000001', name: 'Dr. Aisha Mehta', specialty: 'Cardiologist', qualification: 'MBBS, MD (Cardiology)', experienceYears: 12, consultationFee: 750, rating: 4.9, clinicAddress: 'Heart Care Center, 5th Avenue', reg: 'MH-2013-104521', clinicCity: 'Mumbai', clinicState: 'Maharashtra', clinicPincode: '400058', latitude: 19.1364, longitude: 72.8296 },
   { phone: '+15551000002', name: 'Dr. Nisha Rao', specialty: 'Dermatologist', qualification: 'MBBS, MD (Dermatology)', experienceYears: 8, consultationFee: 600, rating: 4.8, clinicAddress: 'Skin & Aesthetics Clinic', reg: 'MH-2017-118834', clinicCity: 'Mumbai', clinicState: 'Maharashtra', clinicPincode: '400053', latitude: 19.1400, longitude: 72.8250 },

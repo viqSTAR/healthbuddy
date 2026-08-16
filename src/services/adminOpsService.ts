@@ -1375,15 +1375,16 @@ export const getDeliveryBoardService = async (params: { pharmacyId?: string; age
 };
 
 /**
- * Hands an order to a specific account, or takes it back.
+ * Hands an order to a specific rider, or takes it back.
  *
- * Restricted to accounts that could plausibly do the job — a patient account
- * cannot be assigned a delivery. The check exists because the field is a bare
- * user id with no role constraint in the schema, so the constraint has to live
- * somewhere, and a mistyped id silently routing an order into a black hole is
- * exactly the kind of failure an ops tool should not enable.
+ * The field is a bare user id with no constraint in the schema, so the
+ * constraint lives here. It used to admit any partner or admin account,
+ * because there was no rider roster to check against; there is one now, and
+ * an order handed to somebody who is not on it would show up in no app at all.
+ * A patient account was always refused — a mistyped id silently routing an
+ * order into a black hole is exactly the failure an ops tool should not
+ * enable.
  */
-const ASSIGNABLE_ROLES: Role[] = ['PHARMACY', 'LAB_PARTNER', 'ADMIN'];
 
 export const assignDeliveryAgentService = async (params: {
   actorUserId: string;
@@ -1401,15 +1402,14 @@ export const assignDeliveryAgentService = async (params: {
   }
 
   if (params.agentUserId) {
-    const agent = await prisma.user.findUnique({
-      where: { id: params.agentUserId },
-      select: { id: true, role: true, isSuspended: true },
+    const agent = await prisma.deliveryAgent.findUnique({
+      where: { userId: params.agentUserId },
+      select: { isActive: true, verifiedAt: true, user: { select: { isSuspended: true } } },
     });
-    if (!agent) throw notFound('Agent');
-    if (agent.isSuspended) throw new AppError('That account is suspended.', 409);
-    if (!ASSIGNABLE_ROLES.includes(agent.role)) {
-      throw new AppError('Only partner or admin accounts can carry a delivery.', 400);
-    }
+    if (!agent) throw new AppError('That account is not a delivery agent.', 422);
+    if (agent.user.isSuspended) throw new AppError('That account is suspended.', 409);
+    if (!agent.isActive) throw new AppError('That agent is not active.', 422);
+    if (!agent.verifiedAt) throw new AppError('That agent has not been verified yet.', 422);
   }
 
   const updated = await prisma.medicineOrder.update({
@@ -1430,32 +1430,64 @@ export const assignDeliveryAgentService = async (params: {
   return flattenOrderPayment(updated);
 };
 
-/** Accounts that may be handed a delivery, for the assignment picker. */
+/**
+ * Riders who may actually be handed a delivery, for the assignment picker.
+ *
+ * This used to list partner *staff* accounts, because there was no rider
+ * roster to read — the workaround that `getDeliveryBoardService` describes.
+ * There is one now, and assignment validates against it, so offering anything
+ * else here would put names in the picker that the save then rejects.
+ *
+ * Unverified and inactive agents are excluded rather than shown greyed out:
+ * this list exists to be picked from.
+ */
 export const listAssignableAgentsService = async (search?: string) => {
-  const users = await prisma.user.findMany({
+  const agents = await prisma.deliveryAgent.findMany({
     where: {
-      role: { in: ASSIGNABLE_ROLES },
-      isSuspended: false,
-      ...(search ? { phoneNumber: contains(search) } : {}),
+      isActive: true,
+      verifiedAt: { not: null },
+      user: { isSuspended: false },
+      ...(search
+        ? {
+            OR: [
+              { name: contains(search) },
+              { vehicleNumber: contains(search) },
+              { user: { phoneNumber: contains(search) } },
+            ],
+          }
+        : {}),
     },
-    orderBy: { createdAt: 'desc' },
+    // On shift first — a dispatcher wants whoever is working right now.
+    orderBy: [{ isAvailable: 'desc' }, { name: 'asc' }],
     take: 100,
     select: {
-      id: true,
-      phoneNumber: true,
-      role: true,
-      pharmacy: { select: { name: true } },
-      labPartner: { select: { name: true } },
-      _count: { select: { assignedOrders: true, assignedLabOrders: true } },
+      userId: true,
+      name: true,
+      vehicleNumber: true,
+      isAvailable: true,
+      labPartner: { select: { id: true, name: true } },
+      user: {
+        select: {
+          phoneNumber: true,
+          _count: { select: { assignedOrders: true, assignedLabOrders: true, assignedShipments: true } },
+        },
+      },
     },
   });
 
-  return users.map((u) => ({
-    id: u.id,
-    phoneNumber: u.phoneNumber,
-    role: u.role,
-    name: u.pharmacy?.name ?? u.labPartner?.name ?? null,
-    openWork: u._count.assignedOrders + u._count.assignedLabOrders,
+  return agents.map((a) => ({
+    // The id an assignment actually stores is the USER id, not the agent id.
+    id: a.userId,
+    phoneNumber: a.user.phoneNumber,
+    name: a.name,
+    vehicleNumber: a.vehicleNumber,
+    onShift: a.isAvailable,
+    /** Set when this rider may also collect samples, and for which lab. */
+    collectsFor: a.labPartner,
+    openWork:
+      a.user._count.assignedOrders +
+      a.user._count.assignedLabOrders +
+      a.user._count.assignedShipments,
   }));
 };
 
@@ -1820,4 +1852,154 @@ export const upsertLabPackageService = async (params: {
   });
 
   return pkg;
+};
+
+/* ---------- Delivery agents ---------- */
+
+/**
+ * The rider roster.
+ *
+ * Agents sign themselves up, so this is the queue that decides whether any of
+ * them ever sees a job: an unverified agent can read their own profile and
+ * nothing else, because taking a job is what discloses a patient's address.
+ * Without this screen the gate had no other side — somebody could register and
+ * then wait forever.
+ */
+export const listAgentsService = async (
+  params: Page & { search?: string; state?: 'UNVERIFIED' | 'ACTIVE' | 'INACTIVE' | 'ON_SHIFT' }
+) => {
+  const where: Prisma.DeliveryAgentWhereInput = {
+    ...(params.search
+      ? {
+          OR: [
+            { name: contains(params.search) },
+            { vehicleNumber: contains(params.search) },
+            { user: { phoneNumber: contains(params.search) } },
+          ],
+        }
+      : {}),
+    ...(params.state === 'UNVERIFIED' ? { verifiedAt: null } : {}),
+    ...(params.state === 'ACTIVE' ? { isActive: true, verifiedAt: { not: null } } : {}),
+    ...(params.state === 'INACTIVE' ? { isActive: false } : {}),
+    ...(params.state === 'ON_SHIFT' ? { isAvailable: true } : {}),
+  };
+
+  const [total, rows] = await Promise.all([
+    prisma.deliveryAgent.count({ where }),
+    prisma.deliveryAgent.findMany({
+      where,
+      // Unverified first: this list is a work queue before it is a directory.
+      orderBy: [{ verifiedAt: 'asc' }, { createdAt: 'desc' }],
+      skip: (params.page - 1) * params.limit,
+      take: params.limit,
+      select: {
+        id: true,
+        name: true,
+        vehicleNumber: true,
+        isActive: true,
+        isAvailable: true,
+        verifiedAt: true,
+        createdAt: true,
+        user: { select: { id: true, phoneNumber: true, isSuspended: true } },
+        labPartner: { select: { id: true, name: true } },
+        serviceAreas: { select: { pincode: true }, orderBy: { pincode: 'asc' } },
+        _count: { select: { serviceAreas: true } },
+      },
+    }),
+  ]);
+
+  return {
+    total,
+    page: params.page,
+    limit: params.limit,
+    agents: rows.map(({ serviceAreas, _count, ...agent }) => ({
+      ...agent,
+      serviceAreas: serviceAreas.map((a) => a.pincode),
+    })),
+  };
+};
+
+/**
+ * Verifying, suspending, and attaching a collector to a lab.
+ *
+ * `labPartnerId` is set here rather than by the agent, because it is the lab
+ * vouching for someone who will draw blood in a patient's home — not a
+ * preference the rider gets to tick.
+ */
+export const updateAgentService = async (params: {
+  actorUserId: string;
+  id: string;
+  patch: { verified?: boolean; isActive?: boolean; labPartnerId?: string | null };
+  reason?: string;
+  ipAddress?: string | null;
+}) => {
+  const existing = await prisma.deliveryAgent.findUnique({
+    where: { id: params.id },
+    select: { id: true, verifiedAt: true },
+  });
+  if (!existing) throw notFound('Agent');
+
+  const { verified, labPartnerId, ...rest } = params.patch;
+
+  if (labPartnerId) {
+    const lab = await prisma.labPartner.findUnique({
+      where: { id: labPartnerId },
+      select: { id: true },
+    });
+    if (!lab) throw new AppError('That lab does not exist.', 422);
+  }
+
+  const data: Prisma.DeliveryAgentUpdateInput = {
+    ...rest,
+    ...(labPartnerId === undefined
+      ? {}
+      : labPartnerId
+        ? { labPartner: { connect: { id: labPartnerId } } }
+        : { labPartner: { disconnect: true } }),
+    ...(verified === undefined
+      ? {}
+      : { verifiedAt: verified ? (existing.verifiedAt ?? new Date()) : null }),
+  };
+
+  if (Object.keys(data).length === 0) throw new AppError('Nothing to update.', 400);
+
+  /**
+   * Un-verifying or deactivating takes the work back too. Otherwise a rider
+   * removed from the platform would keep the addresses of everything already
+   * in their hand, and the shop would sit waiting for a delivery nobody is
+   * making.
+   */
+  const standsDown = verified === false || rest.isActive === false;
+
+  const agent = await prisma.$transaction(async (tx) => {
+    const updated = await tx.deliveryAgent.update({
+      where: { id: params.id },
+      data,
+      select: { id: true, name: true, verifiedAt: true, isActive: true, userId: true },
+    });
+
+    if (standsDown) {
+      await tx.shipment.updateMany({
+        where: { assignedAgentUserId: updated.userId, status: 'PROCESSING' },
+        data: { assignedAgentUserId: null },
+      });
+      await tx.deliveryAgent.update({
+        where: { id: params.id },
+        data: { isAvailable: false },
+      });
+    }
+
+    return updated;
+  });
+
+  await recordAudit({
+    actorUserId: params.actorUserId,
+    action: 'admin.agent.updated',
+    entityType: 'DeliveryAgent',
+    entityId: agent.id,
+    metadata: { patch: params.patch, reason: params.reason ?? null, standsDown },
+    ipAddress: params.ipAddress ?? null,
+  });
+
+  return agent;
 };

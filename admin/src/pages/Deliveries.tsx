@@ -136,15 +136,15 @@ const AssignDrawer: React.FC<{
         <Resource
           state={agents}
           isEmpty={(list) => list.length === 0}
-          emptyTitle="No account is available to carry this"
+          emptyTitle="No verified rider is available to carry this"
         >
           {(list) => (
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Account</th>
-                    <th>Role</th>
+                    <th>Rider</th>
+                    <th>Shift</th>
                     <th className="num">Open jobs</th>
                     <th />
                   </tr>
@@ -153,11 +153,16 @@ const AssignDrawer: React.FC<{
                   {list.map((a) => (
                     <tr key={a.id}>
                       <td>
-                        {a.name ?? <span className="sub">Unnamed</span>}
+                        {a.name}
                         <span className="sub mono">{a.phoneNumber}</span>
+                        {a.vehicleNumber ? <span className="sub">{a.vehicleNumber}</span> : null}
                       </td>
                       <td>
-                        <Status value={a.role} />
+                        {/* On shift first in the list, so say which is which. */}
+                        <Status
+                          value={a.onShift ? 'ON SHIFT' : 'OFF SHIFT'}
+                          tone={a.onShift ? 'success' : 'neutral'}
+                        />
                       </td>
                       <td className="num">{a.openWork}</td>
                       <td>

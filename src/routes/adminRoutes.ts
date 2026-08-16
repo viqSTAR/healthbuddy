@@ -16,6 +16,8 @@ import {
   listPharmaciesHandler,
   getPharmacyHandler,
   updatePharmacyHandler,
+  listAgentRosterHandler,
+  updateAgentHandler,
   getPharmacyInventoryHandler,
   listLabsHandler,
   getLabHandler,
@@ -195,6 +197,41 @@ router.get(
   getPharmacyInventoryHandler
 );
 
+/* ---------- Delivery agents ---------- */
+
+/**
+ * Agents sign themselves up, so this list is a work queue before it is a
+ * directory: until someone here verifies them they cannot take a single job.
+ */
+router.get(
+  '/agents',
+  validate({
+    query: listQuery.extend({
+      state: z.enum(['UNVERIFIED', 'ACTIVE', 'INACTIVE', 'ON_SHIFT']).optional(),
+    }),
+  }),
+  listAgentRosterHandler
+);
+
+router.patch(
+  '/agents/:id',
+  validate({
+    params: idParam,
+    body: z
+      .object({
+        verified: z.boolean().optional(),
+        isActive: z.boolean().optional(),
+        /** The lab vouching for a collector, or null to detach them. */
+        labPartnerId: uuidSchema.nullable().optional(),
+        reason,
+      })
+      .refine((b) => Object.keys(b).some((k) => k !== 'reason'), {
+        message: 'Send at least one field to change.',
+      }),
+  }),
+  updateAgentHandler
+);
+
 /* ---------- Labs ---------- */
 
 router.get(
@@ -343,7 +380,12 @@ router.get(
   getDeliveryBoardHandler
 );
 
-router.get('/agents', validate({ query: z.object({ search }) }), listAgentsHandler);
+/** The picker on the dispatch board: verified, active riders only. */
+router.get(
+  '/agents/assignable',
+  validate({ query: z.object({ search }) }),
+  listAgentsHandler
+);
 
 /* ---------- Payments ---------- */
 

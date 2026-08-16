@@ -474,3 +474,110 @@ describe('going off shift', () => {
       .expect(400);
   });
 });
+
+describe('an admin decides who may take a job', () => {
+  const anAdmin = async () => {
+    const session = await login();
+    await prisma.user.update({ where: { id: session.userId }, data: { role: 'ADMIN' } });
+    const refreshed = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: session.refreshToken });
+    return { ...session, accessToken: refreshed.body.tokens.accessToken as string };
+  };
+
+  test('an unverified agent appears in the queue and can be verified', async () => {
+    const admin = await anAdmin();
+    const agent = await anAgent({ verified: false });
+
+    const queue = await request(app)
+      .get('/api/v1/admin/agents')
+      .query({ state: 'UNVERIFIED' })
+      .set(auth(admin.accessToken));
+    assert.equal(queue.status, 200, queue.text);
+    assert.ok(
+      (queue.body.agents as { id: string }[]).some((a) => a.id === agent.agentId),
+      'somebody waiting to be verified must be findable'
+    );
+
+    const verified = await request(app)
+      .patch(`/api/v1/admin/agents/${agent.agentId}`)
+      .set(auth(admin.accessToken))
+      .send({ verified: true, reason: 'ID and vehicle checked' });
+    assert.equal(verified.status, 200, verified.text);
+    assert.ok(verified.body.agent.verifiedAt);
+
+    // And the gate opens: the pool answers instead of refusing.
+    await request(app)
+      .get('/api/v1/agent/jobs/available')
+      .set(auth(agent.accessToken))
+      .expect(200);
+  });
+
+  /**
+   * Withdrawing verification has to take the work back too. Otherwise someone
+   * removed from the platform keeps the addresses of everything in their hand,
+   * and the shop waits on a delivery nobody is making.
+   */
+  test('standing an agent down releases the parcels they had not collected', async () => {
+    const admin = await anAdmin();
+    const agent = await anAgent();
+    const { shipment } = await aPackedParcel();
+
+    await request(app)
+      .post(`/api/v1/agent/jobs/${shipment.id}/claim`)
+      .set(auth(agent.accessToken))
+      .expect(200);
+
+    await request(app)
+      .patch(`/api/v1/admin/agents/${agent.agentId}`)
+      .set(auth(admin.accessToken))
+      .send({ isActive: false, reason: 'Left the fleet' })
+      .expect(200);
+
+    const released = await prisma.shipment.findUniqueOrThrow({
+      where: { id: shipment.id },
+      select: { assignedAgentUserId: true, status: true },
+    });
+    assert.equal(released.assignedAgentUserId, null, 'the parcel goes back to the pool');
+    assert.equal(released.status, 'PROCESSING', 'and is still packed and ready');
+
+    // They are also taken off shift, and refused outright.
+    const profile = await prisma.deliveryAgent.findUniqueOrThrow({
+      where: { id: agent.agentId },
+      select: { isAvailable: true },
+    });
+    assert.equal(profile.isAvailable, false);
+
+    await request(app)
+      .get('/api/v1/agent/jobs/available')
+      .set(auth(agent.accessToken))
+      .expect(403);
+  });
+
+  test('the dispatch picker offers only verified, active riders', async () => {
+    const admin = await anAdmin();
+    const ready = await anAgent();
+    const waiting = await anAgent({ verified: false });
+
+    const res = await request(app)
+      .get('/api/v1/admin/agents/assignable')
+      .set(auth(admin.accessToken));
+    assert.equal(res.status, 200, res.text);
+
+    const ids = (res.body.agents as { id: string }[]).map((a) => a.id);
+    assert.ok(ids.includes(ready.userId), 'a verified rider is offered');
+    assert.ok(!ids.includes(waiting.userId), 'an unverified one is not');
+  });
+
+  test('a patient cannot read or change the roster', async () => {
+    const patient = await login();
+    const agent = await anAgent();
+
+    await request(app).get('/api/v1/admin/agents').set(auth(patient.accessToken)).expect(403);
+    await request(app)
+      .patch(`/api/v1/admin/agents/${agent.agentId}`)
+      .set(auth(patient.accessToken))
+      .send({ verified: true })
+      .expect(403);
+  });
+});

@@ -846,17 +846,57 @@ export interface DeliveryBoard {
 export const fetchDeliveryBoard = async (params?: { pharmacyId?: string; agentUserId?: string }) =>
   (await api.get<{ board: DeliveryBoard }>('/admin/deliveries', { params })).data.board;
 
+/** A rider the dispatch board may hand an order to. Verified and active only. */
 export interface AssignableAgent {
+  /** The USER id, which is what an assignment stores. */
   id: string;
   phoneNumber: string;
-  role: Role;
-  name: string | null;
+  name: string;
+  vehicleNumber: string | null;
+  onShift: boolean;
+  /** Set when this rider may also collect samples, and for which lab. */
+  collectsFor: { id: string; name: string } | null;
   openWork: number;
 }
 
 export const fetchAgents = async (search?: string) =>
-  (await api.get<{ agents: AssignableAgent[] }>('/admin/agents', { params: search ? { search } : undefined }))
-    .data.agents;
+  (
+    await api.get<{ agents: AssignableAgent[] }>('/admin/agents/assignable', {
+      params: search ? { search } : undefined,
+    })
+  ).data.agents;
+
+/* ---------- Delivery agent roster ---------- */
+
+/**
+ * Agents sign themselves up and cannot take a single job until verified —
+ * taking one is what discloses a patient's address — so this list is a work
+ * queue before it is a directory.
+ */
+export interface AgentRow {
+  id: string;
+  name: string;
+  vehicleNumber: string | null;
+  isActive: boolean;
+  isAvailable: boolean;
+  verifiedAt: string | null;
+  createdAt: string;
+  user: { id: string; phoneNumber: string; isSuspended: boolean };
+  labPartner: { id: string; name: string } | null;
+  serviceAreas: string[];
+}
+
+export const fetchAgentRoster = async (params?: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: 'UNVERIFIED' | 'ACTIVE' | 'INACTIVE' | 'ON_SHIFT';
+}) => (await api.get<{ agents: AgentRow[] } & Paged>('/admin/agents', { params })).data;
+
+export const updateAgent = async (
+  id: string,
+  patch: { verified?: boolean; isActive?: boolean; labPartnerId?: string | null; reason?: string }
+) => (await api.patch<{ agent: AgentRow }>(`/admin/agents/${id}`, patch)).data.agent;
 
 /* ---------- Payments ---------- */
 
