@@ -1,6 +1,7 @@
 import { Prisma, type AppointmentType, type Medicine } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound, conflict } from '../utils/AppError.js';
+import { logger } from '../utils/logger.js';
 import { recordAudit } from './auditService.js';
 import { createFulfilmentForPrescription } from './fulfilmentService.js';
 
@@ -268,6 +269,27 @@ export const createPrescriptionService = async (params: {
    * prescription. It sends its own notification, so there is none here.
    */
   await createFulfilmentForPrescription(prescription.id);
+
+  /**
+   * Writing the prescription is the other way a consultation ends.
+   *
+   * The follow-up channel is earned by a completed consultation, and the
+   * transaction above completes the appointment. Ending the video call opens a
+   * thread; this path did not, so the most common flow of all — see the
+   * patient, prescribe, done — left the patient with no way to ask a follow-up
+   * question. In-person consultations never open a video room at all, so they
+   * earned a channel that was never created.
+   *
+   * Lazily imported and non-throwing for the same reasons as in videoService:
+   * the prescription is valid and issued, and losing the chat window must not
+   * make it look otherwise.
+   */
+  try {
+    const { openChatForAppointmentService } = await import('./chatService.js');
+    await openChatForAppointmentService(params.appointmentId);
+  } catch (err) {
+    logger.error(`[chat] could not open a thread for appointment ${params.appointmentId}`, err);
+  }
 
   return prescription;
 };

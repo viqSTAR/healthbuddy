@@ -111,7 +111,10 @@ const decorate = <T extends { expiresAt: Date; closedAt: Date | null; blockedAt:
 };
 
 /** Every thread this user is a party to, most recently active first. */
-export const listThreadsService = async (party: { patientId?: string; doctorId?: string }) => {
+export const listThreadsService = async (
+  readerUserId: string,
+  party: { patientId?: string; doctorId?: string }
+) => {
   if (!party.patientId && !party.doctorId) return [];
 
   const threads = await prisma.chatThread.findMany({
@@ -133,17 +136,45 @@ export const listThreadsService = async (party: { patientId?: string; doctorId?:
     },
   });
 
+  /**
+   * Unread counts in one grouped query rather than one per thread.
+   *
+   * A doctor with a day's worth of conversations would otherwise pay a query
+   * per row just to render a badge.
+   */
+  const unreadByThread = new Map<string, number>();
+  if (threads.length > 0) {
+    const grouped = await prisma.chatMessage.groupBy({
+      by: ['threadId'],
+      where: {
+        threadId: { in: threads.map((t) => t.id) },
+        senderUserId: { not: readerUserId },
+        readAt: null,
+      },
+      _count: { _all: true },
+    });
+    for (const row of grouped) unreadByThread.set(row.threadId, row._count._all);
+  }
+
   return threads.map(({ messages, _count, ...thread }) => ({
     ...decorate(thread),
     lastMessage: messages[0] ?? null,
     messageCount: _count.messages,
+    unreadCount: unreadByThread.get(thread.id) ?? 0,
   }));
 };
 
 const requireParty = async (threadId: string, party: { patientId?: string; doctorId?: string }) => {
   const thread = await prisma.chatThread.findUnique({
     where: { id: threadId },
-    select: { ...threadView, patient: { select: { userId: true } }, doctor: { select: { userId: true } } },
+    select: {
+      ...threadView,
+      // Names as well as ids: a client opening this thread from a notification
+      // has nothing but the id, and a conversation headed "Your doctor" when
+      // the server knows the name is a worse screen for no reason.
+      patient: { select: { userId: true, id: true, fullName: true } },
+      doctor: { select: { userId: true, id: true, name: true, specialty: true } },
+    },
   });
   if (!thread) throw notFound('Conversation');
 
@@ -167,8 +198,14 @@ export const getThreadService = async (
     select: { id: true, senderUserId: true, body: true, readAt: true, createdAt: true },
   });
 
-  const { patient: _p, doctor: _d, ...rest } = thread;
-  return { ...decorate(rest), messages };
+  // `userId` identifies the parties to the server; it is not the client's business.
+  const { patient, doctor, ...rest } = thread;
+  return {
+    ...decorate(rest),
+    patient: { id: patient.id, fullName: patient.fullName },
+    doctor: { id: doctor.id, name: doctor.name, specialty: doctor.specialty },
+    messages,
+  };
 };
 
 export const sendMessageService = async (

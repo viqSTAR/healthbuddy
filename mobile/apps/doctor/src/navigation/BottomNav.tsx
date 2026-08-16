@@ -8,6 +8,7 @@ import { Icon, Text, colors, radius, spacing } from '@healthbuddy/shared';
 const ICONS: Record<string, string> = {
   Dashboard: 'dashboard',
   Schedule: 'calendar_month',
+  Messages: 'chat',
   Profile: 'person',
 };
 

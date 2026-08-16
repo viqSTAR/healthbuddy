@@ -134,10 +134,31 @@ export const loginOnce = (phone: string): Promise<Session> => {
 export const cleanupTestUsers = async () => {
   const users = await prisma.user.findMany({
     where: { phoneNumber: { startsWith: `+1999${RUN_ID}` } },
-    select: { id: true, patient: { select: { id: true } } },
+    select: { id: true, patient: { select: { id: true } }, doctor: { select: { id: true } } },
   });
   const userIds = users.map((u) => u.id);
   const patientIds = users.flatMap((u) => (u.patient ? [u.patient.id] : []));
+  const doctorIds = users.flatMap((u) => (u.doctor ? [u.doctor.id] : []));
+
+  /**
+   * Chat comes first, and by thread rather than by sender.
+   *
+   * `ChatMessage.senderUserId` is RESTRICT — deliberately, so an audit can
+   * still name the account behind a message — which means a user who ever sent
+   * one cannot be deleted while it exists. Deleting the thread cascades its
+   * messages, and that also catches the *other* party's replies: a seeded
+   * doctor answering a test patient leaves messages this cleanup does not own
+   * but must still clear to free the row it does.
+   */
+  if (patientIds.length || doctorIds.length) {
+    await prisma.chatThread.deleteMany({
+      where: {
+        OR: [{ patientId: { in: patientIds } }, { doctorId: { in: doctorIds } }],
+      },
+    });
+  }
+  // Any message left in a thread these tests did not own.
+  await prisma.chatMessage.deleteMany({ where: { senderUserId: { in: userIds } } });
 
   if (patientIds.length) {
     // Free any slots these tests booked so reruns aren't starved.

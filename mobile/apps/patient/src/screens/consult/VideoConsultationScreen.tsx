@@ -87,13 +87,15 @@ export const VideoConsultationScreen: React.FC<{ navigation: any; route: any }> 
           </Text>
         </View>
 
-        <Pressable
-          onPress={() => navigation.navigate('ConsultationChat', { appointment })}
-          style={styles.chatFab}
-          accessibilityLabel="Open consultation chat"
-        >
-          <Icon name="chat_bubble" size={20} color={colors.primary} />
-        </Pressable>
+        {/*
+          No chat button during the call.
+
+          Messaging here is the follow-up channel, and the server opens that
+          thread only once the consultation completes — mid-call there is
+          nothing to open. What stood here was a local-only mock that kept a
+          patient's messages on the device and delivered none of them, which is
+          worse than no button at all when someone is describing a symptom.
+        */}
       </View>
 
       <View style={styles.controls}>

@@ -4,6 +4,8 @@ import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
+  ChatConversationScreen,
+  ChatThreadsScreen,
   EarningsScreen,
   NotificationsScreen,
   OtpVerificationScreen,
@@ -37,12 +39,55 @@ const navTheme = {
   },
 };
 
+// A bottom-tab destination: there is nowhere to go back to.
+const DoctorMessages: React.FC<{ navigation: any }> = ({ navigation }) => (
+  <ChatThreadsScreen navigation={navigation} role="DOCTOR" showBack={false} />
+);
+
+const DoctorConversation: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => (
+  <ChatConversationScreen navigation={navigation} route={route} role="DOCTOR" />
+);
+
 const DoctorTabs = () => (
   <Tab.Navigator tabBar={(props) => <BottomNav {...props} />} screenOptions={{ headerShown: false }}>
     <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ tabBarLabel: 'Today' }} />
     <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ tabBarLabel: 'Schedule' }} />
+    <Tab.Screen name="Messages" component={DoctorMessages} options={{ tabBarLabel: 'Messages' }} />
     <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />
   </Tab.Navigator>
+);
+
+/**
+ * The one signed-in-and-verified stack.
+ *
+ * Defined once and rendered from every branch that reaches it: two copies of
+ * this list previously drifted apart, and the branch that was missing a screen
+ * was the one every directly-provisioned doctor landed on.
+ */
+const DoctorStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name="Tabs" component={DoctorTabs} />
+    <Stack.Screen name="Consultation" component={ConsultationScreen} />
+    <Stack.Screen name="Prescribe" component={PrescribeScreen} />
+    <Stack.Screen name="ChatConversation" component={DoctorConversation} />
+    {/* A tapped notification has to land on the thing it is about. */}
+    <Stack.Screen name="Notifications">
+      {({ navigation }) => (
+        <NotificationsScreen
+          navigation={navigation}
+          onOpen={(notification) => {
+            const data = notification.data ?? {};
+            if (typeof data.threadId === 'string') {
+              navigation.navigate('ChatConversation', { threadId: data.threadId });
+            } else if (typeof data.appointmentId === 'string') {
+              navigation.navigate('Consultation', { appointmentId: data.appointmentId });
+            }
+          }}
+        />
+      )}
+    </Stack.Screen>
+    <Stack.Screen name="Earnings" component={EarningsScreen} />
+  </Stack.Navigator>
 );
 
 const Splash = () => (
@@ -76,17 +121,7 @@ const VerifiedArea: React.FC = () => {
    * doctors were locked out of an app they are verified to use, while every
    * endpoint behind it would have served them.
    */
-  if (gate === 'approved') {
-    return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Tabs" component={DoctorTabs} />
-        <Stack.Screen name="Consultation" component={ConsultationScreen} />
-        <Stack.Screen name="Prescribe" component={PrescribeScreen} />
-        <Stack.Screen name="Notifications" component={NotificationsScreen} />
-        <Stack.Screen name="Earnings" component={EarningsScreen} />
-      </Stack.Navigator>
-    );
-  }
+  if (gate === 'approved') return <DoctorStack />;
 
   if (gate === 'unregistered' || !application) {
     return <DoctorRegistrationScreen onSubmitted={() => void reload()} />;
@@ -103,15 +138,7 @@ const VerifiedArea: React.FC = () => {
     );
   }
 
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Tabs" component={DoctorTabs} />
-      <Stack.Screen name="Consultation" component={ConsultationScreen} />
-      <Stack.Screen name="Prescribe" component={PrescribeScreen} />
-      <Stack.Screen name="Notifications" component={NotificationsScreen} />
-      <Stack.Screen name="Earnings" component={EarningsScreen} />
-    </Stack.Navigator>
-  );
+  return <DoctorStack />;
 };
 
 export const RootNavigator: React.FC = () => {

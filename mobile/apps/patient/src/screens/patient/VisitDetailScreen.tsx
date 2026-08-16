@@ -149,6 +149,21 @@ export const VisitDetailScreen: React.FC<{ navigation: any; route: any }> = ({
               onPress={() => navigation.navigate('JoinLobby', { appointmentId: visit.id })}
             />
           ) : null}
+
+          {/*
+            The follow-up channel this consultation earned. Offered here because
+            this is where someone lands when a question occurs to them
+            afterwards — the thread itself was opened server-side when the
+            consultation completed.
+          */}
+          {visit.status === 'COMPLETED' ? (
+            <Button
+              label="Message the doctor"
+              icon="chat"
+              variant="secondary"
+              onPress={() => navigation.navigate('Messages')}
+            />
+          ) : null}
         </Card>
 
         {visit.symptoms ? (

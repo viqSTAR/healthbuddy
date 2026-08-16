@@ -129,6 +129,13 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
                 onPress={() => navigation.navigate('Orders')}
               />
               <ListRow
+                icon="chat"
+                iconTint="success"
+                title="Messages"
+                subtitle="Follow up with a doctor you have seen"
+                onPress={() => navigation.navigate('Messages')}
+              />
+              <ListRow
                 icon="emergency"
                 iconTint="danger"
                 title="Emergency contact"

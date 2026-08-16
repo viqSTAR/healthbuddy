@@ -48,8 +48,8 @@ const partyFor = async (req: AuthenticatedRequest) => {
 router.get(
   '/threads',
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { party } = await partyFor(req);
-    const threads = await listThreadsService(party);
+    const { userId, party } = await partyFor(req);
+    const threads = await listThreadsService(userId, party);
     res.status(200).json({ success: true, count: threads.length, threads });
   })
 );

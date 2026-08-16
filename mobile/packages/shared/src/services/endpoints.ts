@@ -1572,6 +1572,73 @@ export const joinConsultation = async (appointmentId: string) =>
 export const endConsultation = async (appointmentId: string) =>
   (await api.post<{ status: string }>(`/video/${appointmentId}/end`)).data;
 
+/* ---------- Follow-up chat ----------
+ *
+ * A thread is opened by the server when a consultation completes; nothing here
+ * creates one. Both parties use the same four endpoints — which side you are is
+ * resolved from the token — and only the doctor may open or close.
+ */
+
+/** Why a thread will not accept a message. Null when it will. */
+export type ChatBlockReason = 'EXPIRED' | 'CLOSED_BY_DOCTOR' | 'BLOCKED_BY_ADMIN' | null;
+
+export interface ChatMessage {
+  id: string;
+  senderUserId: string;
+  body: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
+interface ChatThreadBase {
+  id: string;
+  patientId: string;
+  doctorId: string;
+  openedAt: string;
+  expiresAt: string;
+  closedAt: string | null;
+  blockedAt: string | null;
+  blockedReason: string | null;
+  /** The server's verdict — never re-derive it from the dates on the client. */
+  canSend: boolean;
+  blockedBecause: ChatBlockReason;
+  /** Ready to show as-is. */
+  blockedMessage: string | null;
+}
+
+export interface ChatThreadSummary extends ChatThreadBase {
+  doctor: { id: string; name: string; specialty: string | null } | null;
+  patient: { id: string; fullName: string | null } | null;
+  lastMessage: { body: string; createdAt: string; senderUserId: string } | null;
+  messageCount: number;
+  unreadCount: number;
+}
+
+export interface ChatThread extends ChatThreadBase {
+  /** Present so a thread opened from a notification can title itself. */
+  doctor: { id: string; name: string; specialty: string | null };
+  patient: { id: string; fullName: string | null };
+  messages: ChatMessage[];
+}
+
+export const fetchChatThreads = async () =>
+  (await api.get<{ threads: ChatThreadSummary[] }>('/chat/threads')).data.threads;
+
+export const fetchChatThread = async (threadId: string) =>
+  (await api.get<{ thread: ChatThread }>(`/chat/threads/${threadId}`)).data.thread;
+
+export const sendChatMessage = async (threadId: string, body: string) =>
+  (await api.post<{ message: ChatMessage }>(`/chat/threads/${threadId}/messages`, { body })).data
+    .message;
+
+export const markChatThreadRead = async (threadId: string) =>
+  (await api.post<{ marked: number }>(`/chat/threads/${threadId}/read`)).data;
+
+/** Doctor only — the server rejects a patient calling this. */
+export const setChatThreadOpen = async (threadId: string, open: boolean) =>
+  (await api.patch<{ thread: ChatThreadSummary }>(`/chat/threads/${threadId}/state`, { open })).data
+    .thread;
+
 /* ---------- Health content & emergency directory ---------- */
 
 export type EmergencyServiceType =

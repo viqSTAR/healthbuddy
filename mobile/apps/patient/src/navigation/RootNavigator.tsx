@@ -8,6 +8,8 @@ import {
   useAuth,
   OtpVerificationScreen,
   NotificationsScreen,
+  ChatThreadsScreen,
+  ChatConversationScreen,
   type AppNotification,
 } from '@healthbuddy/shared';
 
@@ -51,7 +53,6 @@ import { EmergencySosScreen } from '../screens/emergency/EmergencySosScreen';
 // Consultation
 import { JoinLobbyScreen } from '../screens/consult/JoinLobbyScreen';
 import { VideoConsultationScreen } from '../screens/consult/VideoConsultationScreen';
-import { ConsultationChatScreen } from '../screens/consult/ConsultationChatScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -151,7 +152,15 @@ export const RootNavigator: React.FC = () => {
               component={VideoConsultationScreen}
               options={{ animation: 'fade' }}
             />
-            <Stack.Screen name="ConsultationChat" component={ConsultationChatScreen} />
+            {/* Follow-up messaging, opened by the server when a consultation completes. */}
+            <Stack.Screen name="Messages">
+              {({ navigation }) => <ChatThreadsScreen navigation={navigation} role="PATIENT" />}
+            </Stack.Screen>
+            <Stack.Screen name="ChatConversation">
+              {({ navigation, route }) => (
+                <ChatConversationScreen navigation={navigation} route={route} role="PATIENT" />
+              )}
+            </Stack.Screen>
 
             {/*
               Notifications route to the thing they are about. A "prescription
@@ -164,7 +173,9 @@ export const RootNavigator: React.FC = () => {
                   navigation={navigation}
                   onOpen={(notification: AppNotification) => {
                     const data = notification.data ?? {};
-                    if (typeof data.fulfilmentId === 'string') {
+                    if (typeof data.threadId === 'string') {
+                      navigation.navigate('ChatConversation', { threadId: data.threadId });
+                    } else if (typeof data.fulfilmentId === 'string') {
                       navigation.navigate('PrescriptionOrder', { fulfilmentId: data.fulfilmentId });
                     } else if (typeof data.orderId === 'string') {
                       navigation.navigate('OrderTracking', { orderId: data.orderId });
