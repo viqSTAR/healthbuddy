@@ -541,3 +541,177 @@ export const updatePickupStatusService = async (
 
   return updated;
 };
+
+/* ------------------------------------------------------------------ *
+ * Where the parcel is
+ * ------------------------------------------------------------------ */
+
+/**
+ * Two audiences, two answers.
+ *
+ * A dispatcher needs coordinates: which junction is the rider stuck at. A
+ * customer needs to know their medicine is coming and roughly how far off it
+ * is. Those are not the same need, and serving the second with the first hands
+ * a stranger's live position to whoever is holding the phone. So the exact
+ * point is written once and overwritten on the shipment for operations, while
+ * the customer gets place names — and only when the name actually changes.
+ */
+
+/** Metres between two points. Haversine; good to a few metres at city scale. */
+const metresBetween = (
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number => {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
+/** Close enough that the customer should go and find their doorbell. */
+const NEARLY_THERE_METRES = 1_500;
+
+export interface LocationReport {
+  latitude: number;
+  longitude: number;
+  /** Reverse-geocoded on the rider's device. Any may be absent. */
+  street?: string;
+  locality?: string;
+  city?: string;
+}
+
+const samePlace = (
+  a: { street: string | null; locality: string | null; city: string | null },
+  b: LocationReport
+) =>
+  (a.street ?? '') === (b.street ?? '') &&
+  (a.locality ?? '') === (b.locality ?? '') &&
+  (a.city ?? '') === (b.city ?? '');
+
+export const reportJobLocationService = async (
+  agentId: string,
+  shipmentId: string,
+  report: LocationReport
+) => {
+  const agent = await requireWorkingAgent(agentId);
+
+  const job = await prisma.shipment.findFirst({
+    where: { id: shipmentId, assignedAgentUserId: agent.userId },
+    select: {
+      id: true,
+      status: true,
+      nearNotifiedAt: true,
+      order: {
+        select: {
+          id: true,
+          addressRef: { select: { latitude: true, longitude: true } },
+          patient: { select: { userId: true } },
+        },
+      },
+      places: { orderBy: { createdAt: 'desc' }, take: 1 },
+    },
+  });
+  if (!job) throw notFound('Job');
+
+  /**
+   * Only while the parcel is actually moving.
+   *
+   * A rider who has not collected it yet is going about their own day, and one
+   * who has delivered it is finished. Recording either would be tracking a
+   * person rather than a parcel.
+   */
+  if (job.status !== 'DISPATCHED') {
+    throw conflict('This job is not in transit, so there is nothing to track.');
+  }
+
+  const previous = job.places[0];
+  const placeChanged = !previous || !samePlace(previous, report);
+
+  await prisma.shipment.update({
+    where: { id: shipmentId },
+    data: {
+      riderLatitude: report.latitude,
+      riderLongitude: report.longitude,
+      riderSeenAt: new Date(),
+    },
+  });
+
+  if (placeChanged) {
+    await prisma.shipmentPlace.create({
+      data: {
+        shipmentId,
+        street: report.street ?? null,
+        locality: report.locality ?? null,
+        city: report.city ?? null,
+        latitude: report.latitude,
+        longitude: report.longitude,
+      },
+    });
+
+    /**
+     * Notify on the town, not the street.
+     *
+     * A long-distance parcel crosses dozens of streets, and a phone that buzzes
+     * at every one gets muted — after which the notice that matters is muted
+     * too. Reaching a new town or suburb is worth interrupting someone for; a
+     * new road is not, so it lands in the trail silently.
+     */
+    const areaChanged =
+      !previous ||
+      (report.city ?? '') !== (previous.city ?? '') ||
+      (report.locality ?? '') !== (previous.locality ?? '');
+
+    const where = report.locality ?? report.city;
+    if (areaChanged && where) {
+      await notify({
+        userId: job.order.patient.userId,
+        type: 'ORDER_STATUS_CHANGED',
+        title: 'Your order is on the move',
+        body: `Your delivery has reached ${where}.`,
+        data: { orderId: job.order.id, shipmentId },
+        appId: 'PATIENT',
+      });
+    }
+  }
+
+  // "Nearly there" needs a destination to measure against, and a saved address
+  // has coordinates only if it was placed from a map or a geocode.
+  const destination = job.order.addressRef;
+  let nearlyThere = false;
+
+  if (
+    !job.nearNotifiedAt &&
+    destination?.latitude != null &&
+    destination.longitude != null
+  ) {
+    const away = metresBetween(
+      { lat: report.latitude, lng: report.longitude },
+      { lat: destination.latitude, lng: destination.longitude }
+    );
+
+    if (away <= NEARLY_THERE_METRES) {
+      nearlyThere = true;
+      await prisma.shipment.update({
+        where: { id: shipmentId },
+        data: { nearNotifiedAt: new Date() },
+      });
+      await notify({
+        userId: job.order.patient.userId,
+        type: 'ORDER_STATUS_CHANGED',
+        title: 'Arriving soon',
+        body: 'Your delivery is a few minutes away.',
+        data: { orderId: job.order.id, shipmentId },
+        appId: 'PATIENT',
+      });
+    }
+  }
+
+  // Nothing about the rider goes back to the rider's own app either — it knows
+  // where it is. Just enough to show that the report landed.
+  return { recorded: true as const, placeChanged, nearlyThere };
+};

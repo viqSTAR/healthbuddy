@@ -69,6 +69,14 @@ export const OrderTrackingScreen: React.FC<{ navigation: any; route: any }> = ({
           speed: sh.speed,
           items: sh.items,
           cancelReason: sh.cancelReason,
+          /** Plain English for what is happening, decided server-side. */
+          stageText: sh.stageText,
+          riderOnBoard: sh.riderOnBoard,
+          /**
+           * Place names the parcel has passed through. Names, never a position
+           * — the rider's coordinates go to the dispatch board and not here.
+           */
+          journey: sh.journey ?? [],
         }))
       : [
           {
@@ -78,6 +86,9 @@ export const OrderTrackingScreen: React.FC<{ navigation: any; route: any }> = ({
             speed: 'STANDARD' as const,
             items: order.items,
             cancelReason: order.cancelReason,
+            stageText: undefined,
+            riderOnBoard: false,
+            journey: [] as { place: string; at: string }[],
           },
         ];
 
@@ -198,6 +209,49 @@ export const OrderTrackingScreen: React.FC<{ navigation: any; route: any }> = ({
                 })
               )}
 
+              {/*
+                Where it has got to, in place names.
+                Only present once a rider is carrying it and has moved through
+                somewhere worth naming, so it stays absent on a local hop.
+              */}
+              {parcel.journey.length > 0 ? (
+                <>
+                  <View style={styles.rule} />
+                  <View style={styles.journey}>
+                    <Text variant="labelMd" weight="semibold" color={colors.headingDark}>
+                      Where it has reached
+                    </Text>
+                    {parcel.journey
+                      .slice()
+                      .reverse()
+                      .slice(0, 4)
+                      .map((leg, i) => (
+                        <View key={`${leg.place}-${leg.at}`} style={styles.legRow}>
+                          <Icon
+                            name={i === 0 ? 'my_location' : 'place'}
+                            size={14}
+                            color={i === 0 ? colors.primary : colors.captionGray}
+                          />
+                          <Text
+                            variant="captionSm"
+                            weight={i === 0 ? 'semibold' : 'regular'}
+                            color={i === 0 ? colors.onSurface : colors.captionGray}
+                            style={styles.flex}
+                          >
+                            {leg.place}
+                          </Text>
+                          <Text variant="captionSm" color={colors.captionGray}>
+                            {new Date(leg.at).toLocaleTimeString(undefined, {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </Text>
+                        </View>
+                      ))}
+                  </View>
+                </>
+              ) : null}
+
               <View style={styles.rule} />
 
               {parcel.items.map((item) => (
@@ -281,5 +335,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  journey: { gap: 6 },
+  legRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rule: { height: 1, backgroundColor: colors.outlineVariant },
 });

@@ -1130,12 +1130,56 @@ model Shipment {
   deliveredAt         DateTime?
   cancelReason        String?
 
+  /// Where the rider was last seen, and when.
+  ///
+  /// Overwritten on every report rather than appended, because this is the
+  /// operations view — a dispatcher wants to know where the parcel is now, not
+  /// to reconstruct the ride. It is deliberately NOT what the patient is shown:
+  /// a customer does not need a stranger's exact position on a map, and the
+  /// place names below are enough to answer "where is my medicine".
+  riderLatitude  Float?
+  riderLongitude Float?
+  riderSeenAt    DateTime?
+
+  /// Stamped when the "arriving soon" notice went out, so it goes out once.
+  nearNotifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  places ShipmentPlace[]
 
   @@index([orderId])
   @@index([pharmacyId, status])
   @@index([assignedAgentUserId])
+}
+
+/// A place the parcel has passed through, by name.
+///
+/// Written only when the name changes, never on every report — a rider pinging
+/// every half minute across a city would otherwise write hundreds of rows
+/// saying the same thing. This is the trail a patient sees: "left Andheri
+/// West", "now in Bandra". Coordinates are kept for the operations board and
+/// are never returned to a customer.
+///
+/// Reverse geocoding happens on the rider's device via the OS geocoder, so
+/// there is no third-party geocoding key on the server and no round trip per
+/// report.
+model ShipmentPlace {
+  id         String   @id @default(uuid())
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  street   String?
+  locality String?
+  city     String?
+
+  latitude  Float
+  longitude Float
+
+  createdAt DateTime @default(now())
+
+  @@index([shipmentId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -236,7 +236,36 @@ export interface Shipment {
   cancelReason: string | null;
   createdAt: string;
   pharmacy: { id: string; name: string; city: string | null };
+
+  /**
+   * What is happening, in the words a person would use.
+   *
+   * Derived on the server so the app, a receipt and a notification cannot
+   * disagree about the same parcel.
+   */
+  stage?: DeliveryStage;
+  stageText?: string;
+  /** That somebody is carrying it — never who. */
+  riderOnBoard?: boolean;
+  /**
+   * Place names the parcel has passed through, oldest first.
+   *
+   * Names only. The rider's coordinates go to the dispatch board; a customer
+   * asking "where is my medicine" is answered with "it has reached Bandra"
+   * rather than a live dot following a stranger around.
+   */
+  journey?: { place: string; street: string | null; city: string | null; at: string }[];
 }
+
+export type DeliveryStage =
+  | 'PLACED'
+  | 'PACKING'
+  | 'PACKED_AWAITING_RIDER'
+  | 'RIDER_ASSIGNED'
+  | 'OUT_FOR_DELIVERY'
+  | 'ARRIVING_SOON'
+  | 'DELIVERED'
+  | 'CANCELLED';
 
 export type OrderStatus =
   /** Held until the money arrives. Never appears in a partner queue. */
@@ -1805,6 +1834,29 @@ export const updateAgentJobStatus = async (
       status,
       ...(codCollected === undefined ? {} : { codCollected }),
     })
+  ).data;
+
+/**
+ * Where the rider is, while a parcel is in transit.
+ *
+ * The place names are reverse-geocoded on the device — the server never
+ * geocodes, and the customer is shown the names rather than the point.
+ */
+export const reportJobLocation = async (
+  id: string,
+  report: {
+    latitude: number;
+    longitude: number;
+    street?: string;
+    locality?: string;
+    city?: string;
+  }
+) =>
+  (
+    await api.post<{ recorded: boolean; placeChanged: boolean; nearlyThere: boolean }>(
+      `/agent/jobs/${id}/location`,
+      report
+    )
   ).data;
 
 export const markSampleCollected = async (id: string) =>

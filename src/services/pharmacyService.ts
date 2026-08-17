@@ -334,8 +334,114 @@ const shipmentView = {
     cancelReason: true,
     createdAt: true,
     pharmacy: { select: { id: true, name: true, city: true } },
+    /**
+     * Whether a rider has it, and whether they are nearly there. Deliberately
+     * the flags and not `assignedAgentUserId` — who is carrying it is not the
+     * customer's business, only that somebody is.
+     */
+    assignedAgentUserId: true,
+    nearNotifiedAt: true,
+    /**
+     * Place names the parcel has passed through, oldest first.
+     *
+     * Names only. `riderLatitude`/`riderLongitude` exist on this row and are
+     * deliberately absent from this selection: a customer asking "where is my
+     * medicine" is answered by "it has reached Bandra", and handing them a live
+     * coordinate instead would put a rider's exact position on a stranger's
+     * screen for the length of their shift.
+     */
+    places: {
+      select: { street: true, locality: true, city: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    },
   },
 } as const;
+
+/**
+ * What to tell the customer, in the words they would use.
+ *
+ * The statuses are warehouse words — PROCESSING, DISPATCHED — and a person
+ * waiting on medicine wants to know whether somebody is bringing it. Derived
+ * here rather than in each app so the patient app, a receipt and a
+ * notification cannot disagree about the same parcel.
+ */
+export type DeliveryStage =
+  | 'PLACED'
+  | 'PACKING'
+  | 'PACKED_AWAITING_RIDER'
+  | 'RIDER_ASSIGNED'
+  | 'OUT_FOR_DELIVERY'
+  | 'ARRIVING_SOON'
+  | 'DELIVERED'
+  | 'CANCELLED';
+
+const deliveryStage = (shipment: {
+  status: string;
+  assignedAgentUserId: string | null;
+  nearNotifiedAt: Date | null;
+}): DeliveryStage => {
+  switch (shipment.status) {
+    case 'CANCELLED':
+      return 'CANCELLED';
+    case 'DELIVERED':
+      return 'DELIVERED';
+    case 'DISPATCHED':
+      return shipment.nearNotifiedAt ? 'ARRIVING_SOON' : 'OUT_FOR_DELIVERY';
+    case 'PROCESSING':
+      // Packed either way; the difference is whether anyone is coming for it.
+      return shipment.assignedAgentUserId ? 'RIDER_ASSIGNED' : 'PACKED_AWAITING_RIDER';
+    case 'ACCEPTED':
+      return 'PACKING';
+    default:
+      return 'PLACED';
+  }
+};
+
+/** One line of plain English per stage, so every surface says the same thing. */
+const STAGE_TEXT: Record<DeliveryStage, string> = {
+  PLACED: 'Order placed.',
+  PACKING: 'The pharmacy is preparing your order.',
+  PACKED_AWAITING_RIDER: 'Packed and waiting for a delivery partner.',
+  RIDER_ASSIGNED: 'A delivery partner is on the way to collect it.',
+  OUT_FOR_DELIVERY: 'Out for delivery.',
+  ARRIVING_SOON: 'Arriving soon — a few minutes away.',
+  DELIVERED: 'Delivered.',
+  CANCELLED: 'This parcel was cancelled.',
+};
+
+/**
+ * Strips the parcel down to what its recipient may see, and adds the stage.
+ *
+ * The rider's identity and coordinates never reach here; `places` is a list of
+ * names. `riderOnBoard` says a person has it without saying who.
+ */
+const forRecipient = <
+  T extends {
+    assignedAgentUserId: string | null;
+    nearNotifiedAt: Date | null;
+    status: string;
+    places?: { street: string | null; locality: string | null; city: string | null; createdAt: Date }[];
+  },
+>(
+  shipment: T
+) => {
+  const { assignedAgentUserId, nearNotifiedAt, places, ...rest } = shipment;
+  const stage = deliveryStage(shipment);
+
+  return {
+    ...rest,
+    stage,
+    stageText: STAGE_TEXT[stage],
+    riderOnBoard: assignedAgentUserId !== null,
+    /** Named places, oldest first. Empty until the parcel is actually moving. */
+    journey: (places ?? []).map((p) => ({
+      place: p.locality ?? p.city ?? p.street ?? 'On the way',
+      street: p.street,
+      city: p.city,
+      at: p.createdAt,
+    })),
+  };
+};
 
 /**
  * What the order as a whole is doing, read off its parcels.
@@ -384,10 +490,11 @@ export const getPatientMedicineOrdersService = async (patientId: string) => {
     include: { shipments: shipmentView },
   });
 
-  return orders.map((order) => ({
+  return orders.map(({ assignedAgentUserId: _carriedBy, ...order }) => ({
     ...order,
     status: deriveOrderStatus(order.shipments, order.status),
     shipmentCount: order.shipments.length,
+    shipments: order.shipments.map(forRecipient),
   }));
 };
 
@@ -439,10 +546,17 @@ export const getPatientOrderByIdService = async (orderId: string, patientId: str
   // Return 404 rather than 403 so ids cannot be probed for existence.
   if (!order || order.patientId !== patientId) throw notFound('Order');
 
+  // `assignedAgentUserId` is the order-level rider column. It was going
+  // straight out to the customer, which names the person carrying their
+  // parcel — the parcels below already say that somebody is, which is the part
+  // that is any of their business.
+  const { assignedAgentUserId: _carriedBy, ...rest } = order;
+
   return {
-    ...order,
+    ...rest,
     status: deriveOrderStatus(order.shipments, order.status),
     shipmentCount: order.shipments.length,
+    shipments: order.shipments.map(forRecipient),
   };
 };
 

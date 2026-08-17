@@ -1039,6 +1039,33 @@ const ORDER_LIST_SELECT = {
   fulfilment: {
     select: { id: true, payment: { select: { id: true, status: true, method: true, amount: true, paidAt: true } } },
   },
+  /**
+   * Where each parcel's rider was last seen, as coordinates.
+   *
+   * This is the operations view and the only place the exact point is exposed.
+   * The customer's own order read deliberately omits it and returns place
+   * names instead — a dispatcher needs to know which junction a rider is stuck
+   * at, and a customer does not need a live dot following a stranger around.
+   */
+  shipments: {
+    select: {
+      id: true,
+      status: true,
+      riderLatitude: true,
+      riderLongitude: true,
+      riderSeenAt: true,
+      nearNotifiedAt: true,
+      pharmacy: { select: { name: true } },
+      assignedAgent: {
+        select: { id: true, phoneNumber: true, agent: { select: { name: true, vehicleNumber: true } } },
+      },
+      places: {
+        select: { street: true, locality: true, city: true, latitude: true, longitude: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      },
+    },
+  },
 } satisfies Prisma.MedicineOrderSelect;
 
 /**

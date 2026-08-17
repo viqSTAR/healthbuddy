@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Linking, Platform } from 'react-native';
+import * as Location from 'expo-location';
 import {
   Alert,
   Badge,
@@ -24,6 +25,8 @@ import {
   useAsync,
 } from '@healthbuddy/shared';
 
+import { useJobLocation } from '../services/useJobLocation';
+
 /**
  * One job, end to end.
  *
@@ -38,6 +41,23 @@ export const JobDetailScreen: React.FC<{ navigation: any; route: any }> = ({
   const { jobId } = route.params as { jobId: string };
   const job = useAsync(() => fetchAgentJob(jobId), [jobId]);
   const [busy, setBusy] = useState(false);
+
+  /**
+   * Position is reported only once the parcel is in the bag.
+   *
+   * Passing null before collection is what stops this being a tracker on a
+   * person: there is nothing to follow until they are carrying something, and
+   * the server refuses those reports too.
+   */
+  const carrying = job.data?.status === 'DISPATCHED';
+  useJobLocation(carrying ? jobId : null);
+
+  // Asked when it first becomes relevant, rather than on app launch, so the
+  // prompt arrives with an obvious reason attached.
+  useEffect(() => {
+    if (!carrying) return;
+    void Location.requestForegroundPermissionsAsync();
+  }, [carrying]);
 
   const call = (phone: string) => void Linking.openURL(`tel:${phone}`);
 

@@ -11,6 +11,7 @@ import {
   getJobHandler,
   updateJobStatusHandler,
   updatePickupStatusHandler,
+  reportJobLocationHandler,
 } from '../controllers/agentController.js';
 import { authenticateJwt, authorizeRoles } from '../middlewares/auth.js';
 import { validate, uuidSchema } from '../middlewares/validate.js';
@@ -99,6 +100,29 @@ router.patch(
     }),
   }),
   updateJobStatusHandler
+);
+
+/**
+ * Where the rider is, while a parcel is actually in transit.
+ *
+ * The exact point is for operations. The customer is told place names, and only
+ * when the name changes — the service decides that, not the caller, so a
+ * chatty client cannot turn itself into a live tracker on somebody's doorstep.
+ */
+router.post(
+  '/jobs/:id/location',
+  validate({
+    params: z.object({ id: uuidSchema }),
+    body: z.object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      /** Reverse-geocoded on the device; the server never geocodes. */
+      street: z.string().trim().max(160).optional(),
+      locality: z.string().trim().max(160).optional(),
+      city: z.string().trim().max(160).optional(),
+    }),
+  }),
+  reportJobLocationHandler
 );
 
 /** Sample collection. The service refuses this unless a lab has taken them on. */

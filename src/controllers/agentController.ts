@@ -11,6 +11,7 @@ import {
   getJobService,
   updateJobStatusService,
   updatePickupStatusService,
+  reportJobLocationService,
 } from '../services/agentService.js';
 import {
   asyncHandler,
@@ -88,5 +89,13 @@ export const updatePickupStatusHandler = asyncHandler(
     const { id } = req.params as { id: string };
     const pickup = await updatePickupStatusService(requireAgentId(req), id, 'SAMPLE_COLLECTED');
     res.status(200).json({ success: true, pickup });
+  }
+);
+
+export const reportJobLocationHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params as { id: string };
+    const result = await reportJobLocationService(requireAgentId(req), id, req.body);
+    res.status(200).json({ success: true, ...result });
   }
 );
