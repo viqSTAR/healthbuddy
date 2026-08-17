@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import { reportJobLocation } from '@healthbuddy/shared';
@@ -41,8 +41,19 @@ const metresBetween = (
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
+/**
+ * What the rider should be told about their own reporting.
+ *
+ * Returned rather than swallowed: this used to fail silently when location
+ * permission was missing, so a rider whose phone had it switched off looked
+ * exactly like one who was reporting fine, and the shop and the customer both
+ * lost sight of the parcel with nobody aware anything was wrong.
+ */
+export type LocationState = 'off' | 'denied' | 'waiting' | 'reporting' | 'failing';
+
 export const useJobLocation = (jobId: string | null) => {
   const lastSent = useRef<{ latitude: number; longitude: number } | null>(null);
+  const [state, setState] = useState<LocationState>('off');
 
   useEffect(() => {
     if (!jobId) return;
@@ -53,11 +64,24 @@ export const useJobLocation = (jobId: string | null) => {
     const reportOnce = async () => {
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
-        if (status !== 'granted') return;
+        if (status !== 'granted') {
+          setState('denied');
+          return;
+        }
 
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        /**
+         * Last known fix first, a fresh one only if there is none.
+         *
+         * `getCurrentPositionAsync` waits for the provider to answer, and on a
+         * weak signal — a basement car park, a lift, an emulator whose fused
+         * provider is not serving — it simply never resolves, which stalls every
+         * subsequent report behind it. A fix from a minute ago is a perfectly
+         * good answer to "roughly where is this parcel", and it returns at once.
+         */
+        const cached = await Location.getLastKnownPositionAsync({ maxAge: 2 * EVERY_MS });
+        const position =
+          cached ??
+          (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
         if (cancelled) return;
 
         const here = {
@@ -67,7 +91,10 @@ export const useJobLocation = (jobId: string | null) => {
 
         // A parked scooter drifts by a few metres. Sending that would spend
         // battery and a request to tell the server nothing changed.
-        if (lastSent.current && metresBetween(lastSent.current, here) < MOVED_METRES) return;
+        if (lastSent.current && metresBetween(lastSent.current, here) < MOVED_METRES) {
+          setState('reporting');
+          return;
+        }
 
         let place: { street?: string; locality?: string; city?: string } = {};
         try {
@@ -91,14 +118,18 @@ export const useJobLocation = (jobId: string | null) => {
         if (cancelled) return;
         await reportJobLocation(jobId, { ...here, ...place });
         lastSent.current = here;
+        setState('reporting');
       } catch {
-        // A dropped report is not worth interrupting a delivery for. The next
-        // one is along in under a minute.
+        // A dropped report is not worth interrupting a delivery for — the next
+        // is along in under a minute — but it is worth showing, because a rider
+        // with no signal should know the shop cannot see them.
+        if (!cancelled) setState('failing');
       }
     };
 
     const start = () => {
       if (timer) return;
+      setState('waiting');
       void reportOnce();
       timer = setInterval(() => void reportOnce(), EVERY_MS);
     };
@@ -116,6 +147,15 @@ export const useJobLocation = (jobId: string | null) => {
       cancelled = true;
       stop();
       sub.remove();
+      setState('off');
     };
   }, [jobId]);
+
+  /** Asks for permission, then reports immediately rather than after a wait. */
+  const grant = useCallback(async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    setState(status === 'granted' ? 'waiting' : 'denied');
+  }, []);
+
+  return { state, grant };
 };

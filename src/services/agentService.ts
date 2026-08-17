@@ -2,6 +2,7 @@ import type { OrderStatus } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { toNum } from '../utils/money.js';
 import { AppError, notFound, conflict, forbidden } from '../utils/AppError.js';
+import { logger } from '../utils/logger.js';
 import { notify } from './notificationService.js';
 import { recordAudit } from './auditService.js';
 
@@ -479,6 +480,17 @@ export const updateJobStatusService = async (
   // Reuses the shop's own transition so stock consumption, the order status
   // rollup, COD settlement on the last parcel and the patient's notification
   // all happen exactly once, in one place, however the parcel got moved.
+  // Read before the transition, because delivering is what clears the rider's
+  // last position off the parcel.
+  if (status === 'DELIVERED') {
+    await learnDoorFromDelivery(shipmentId).catch((err: unknown) =>
+      // Worth nothing on its own — the parcel has arrived either way, and the
+      // only cost of losing it is that the next one to this address has no
+      // arriving-soon notice.
+      logger.error(`[delivery] could not learn the door for shipment ${shipmentId}`, err)
+    );
+  }
+
   const { updateShipmentStatusService } = await import('./shipmentService.js');
   const updated = await updateShipmentStatusService(shipmentId, job.pharmacyId, status);
 
@@ -714,4 +726,49 @@ export const reportJobLocationService = async (
   // Nothing about the rider goes back to the rider's own app either — it knows
   // where it is. Just enough to show that the report landed.
   return { recorded: true as const, placeChanged, nearlyThere };
+};
+
+/** A fix older than this is where the rider was, not where the door is. */
+const DOOR_FIX_FRESH_MS = 10 * 60 * 1000;
+
+/**
+ * Remembers where the door actually turned out to be.
+ *
+ * "Arriving soon" needs a point to measure the rider against, and a typed
+ * address has none — only ones saved from the map do, which in practice is the
+ * minority. That left the stage the whole feature was asked for unreachable for
+ * most addresses: correct code that never ran.
+ *
+ * A rider standing at the door as they hand the parcel over is the best fix that
+ * address will ever get — better than geocoding a street name, and free. So the
+ * first delivery to a new address teaches the platform where it is, and every
+ * parcel after that gets the arriving-soon notice.
+ *
+ * Two limits keep a bad fix out. It only ever fills a blank, so a position taken
+ * in a lobby can never drag a good one that the patient pinned themselves. And
+ * the fix must be recent: a rider whose phone last reported an hour ago, or who
+ * marks a stack of parcels delivered back at the shop, would otherwise stamp the
+ * address with somewhere else entirely.
+ */
+const learnDoorFromDelivery = async (shipmentId: string) => {
+  const parcel = await prisma.shipment.findUnique({
+    where: { id: shipmentId },
+    select: {
+      riderLatitude: true,
+      riderLongitude: true,
+      riderSeenAt: true,
+      order: { select: { addressId: true, addressRef: { select: { latitude: true } } } },
+    },
+  });
+
+  const addressId = parcel?.order.addressId;
+  if (!parcel || !addressId) return;
+  if (parcel.riderLatitude == null || parcel.riderLongitude == null) return;
+  if (parcel.order.addressRef?.latitude != null) return;
+  if (!parcel.riderSeenAt || Date.now() - parcel.riderSeenAt.getTime() > DOOR_FIX_FRESH_MS) return;
+
+  await prisma.address.update({
+    where: { id: addressId },
+    data: { latitude: parcel.riderLatitude, longitude: parcel.riderLongitude },
+  });
 };

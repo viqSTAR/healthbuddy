@@ -157,6 +157,18 @@ export const updateShipmentStatusService = async (
       status,
       ...(stamp ? { [stamp]: new Date() } : {}),
       ...(status === 'CANCELLED' && cancelReason ? { cancelReason } : {}),
+      /**
+       * The rider's exact position does not outlive the parcel it was following.
+       *
+       * It exists so a dispatcher can see which junction a live delivery is
+       * stuck at. Once the parcel is handed over or cancelled there is nothing
+       * to dispatch, and what remains is a record of where a named person stood
+       * at a given minute, kept forever for no reason. The named places stay —
+       * they are the delivery's own history and carry no precision.
+       */
+      ...(status === 'DELIVERED' || status === 'CANCELLED'
+        ? { riderLatitude: null, riderLongitude: null, riderSeenAt: null }
+        : {}),
     },
   });
 

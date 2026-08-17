@@ -185,6 +185,26 @@ describe('the customer is told where, not exactly where', () => {
     );
   });
 
+  test('crossing streets of one suburb reads as one place, not four', async () => {
+    const { patient, agent, shipment, orderId } = await aParcelInTransit();
+
+    // Operations wants every street; the patient is shown the suburb, so the
+    // same name four times over would read like a parcel that had stopped.
+    for (const street of ['Hill Road', 'Turner Road', 'Perry Road', 'Carter Road']) {
+      await request(app)
+        .post(`/api/v1/agent/jobs/${shipment.id}/location`)
+        .set(auth(agent.accessToken))
+        .send({ ...RIDER, street, locality: 'Bandra West', city: 'Mumbai' })
+        .expect(200);
+    }
+
+    const mine = await trackedBy(patient.accessToken, orderId);
+    assert.deepEqual(
+      mine.body.order.shipments[0].journey.map((j: { place: string }) => j.place),
+      ['Bandra West']
+    );
+  });
+
   test('the stage says what is happening in words a person would use', async () => {
     const { patient, orderId } = await aParcelInTransit();
     const mine = await trackedBy(patient.accessToken, orderId);
@@ -291,5 +311,110 @@ describe('arriving soon', () => {
       .set(auth(agent.accessToken))
       .send({ latitude: 19.18, longitude: 72.85, locality: 'Borivali', city: 'Mumbai' });
     assert.equal(res.body.nearlyThere, false);
+  });
+});
+
+/**
+ * The stage above needs a destination, and a typed address has none — which made
+ * "arriving soon" correct code that never ran for most orders. A rider at the
+ * door is the fix that address never had.
+ */
+describe('the first delivery teaches where the door is', () => {
+  const addressOf = async (orderId: string) => {
+    const order = await prisma.medicineOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { addressId: true },
+    });
+    assert.ok(order.addressId);
+    return prisma.address.findUniqueOrThrow({ where: { id: order.addressId } });
+  };
+
+  const deliver = (token: string, shipmentId: string) =>
+    request(app)
+      .patch(`/api/v1/agent/jobs/${shipmentId}/status`)
+      .set(auth(token))
+      .send({ status: 'DELIVERED' });
+
+  test('an unpinned address takes the position it was handed over at', async () => {
+    const { agent, shipment, orderId } = await aParcelInTransit();
+
+    const before = await addressOf(orderId);
+    assert.equal(before.latitude, null, 'a typed address starts with no point');
+
+    await request(app)
+      .post(`/api/v1/agent/jobs/${shipment.id}/location`)
+      .set(auth(agent.accessToken))
+      .send({ ...RIDER, locality: 'Andheri West', city: 'Mumbai' })
+      .expect(200);
+
+    const done = await deliver(agent.accessToken, shipment.id);
+    assert.equal(done.status, 200, done.text);
+
+    const after = await addressOf(orderId);
+    assert.equal(after.latitude, RIDER.latitude);
+    assert.equal(after.longitude, RIDER.longitude);
+  });
+
+  test('an address the patient pinned themselves is left alone', async () => {
+    const { agent, shipment, orderId } = await aParcelInTransit();
+
+    const address = await addressOf(orderId);
+    await prisma.address.update({
+      where: { id: address.id },
+      data: { latitude: 19.05, longitude: 72.85 },
+    });
+
+    await request(app)
+      .post(`/api/v1/agent/jobs/${shipment.id}/location`)
+      .set(auth(agent.accessToken))
+      // A rider marking it delivered from the lobby, or from the wrong building.
+      .send(RIDER)
+      .expect(200);
+    await deliver(agent.accessToken, shipment.id).expect(200);
+
+    const after = await addressOf(orderId);
+    assert.equal(after.latitude, 19.05, 'a good point must not be dragged by a delivery');
+  });
+
+  test('a stale fix is not mistaken for the door', async () => {
+    const { agent, shipment, orderId } = await aParcelInTransit();
+
+    await request(app)
+      .post(`/api/v1/agent/jobs/${shipment.id}/location`)
+      .set(auth(agent.accessToken))
+      .send(RIDER)
+      .expect(200);
+
+    // A rider who marks a stack of parcels delivered back at the shop, hours
+    // after they last reported, would otherwise stamp the address with the shop.
+    await prisma.shipment.update({
+      where: { id: shipment.id },
+      data: { riderSeenAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+    await deliver(agent.accessToken, shipment.id).expect(200);
+
+    const after = await addressOf(orderId);
+    assert.equal(after.latitude, null);
+  });
+
+  test('the rider position does not outlive the parcel', async () => {
+    const { agent, shipment } = await aParcelInTransit();
+
+    await request(app)
+      .post(`/api/v1/agent/jobs/${shipment.id}/location`)
+      .set(auth(agent.accessToken))
+      .send(RIDER)
+      .expect(200);
+    await deliver(agent.accessToken, shipment.id).expect(200);
+
+    // It exists so a dispatcher can see a live parcel. Once handed over it is
+    // only a record of where a named person stood.
+    const parcel = await prisma.shipment.findUniqueOrThrow({
+      where: { id: shipment.id },
+      select: { riderLatitude: true, riderSeenAt: true, places: true },
+    });
+    assert.equal(parcel.riderLatitude, null);
+    assert.equal(parcel.riderSeenAt, null);
+    assert.equal(parcel.places.length, 1, 'the named places are the delivery record and stay');
   });
 });

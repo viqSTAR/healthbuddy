@@ -50,7 +50,7 @@ export const JobDetailScreen: React.FC<{ navigation: any; route: any }> = ({
    * the server refuses those reports too.
    */
   const carrying = job.data?.status === 'DISPATCHED';
-  useJobLocation(carrying ? jobId : null);
+  const tracking = useJobLocation(carrying ? jobId : null);
 
   // Asked when it first becomes relevant, rather than on app launch, so the
   // prompt arrives with an obvious reason attached.
@@ -279,9 +279,44 @@ export const JobDetailScreen: React.FC<{ navigation: any; route: any }> = ({
       </View>
 
       {data.status === 'DISPATCHED' ? (
-        <View style={styles.hint}>
-          <Badge label="On the way" tint="info" icon="local_shipping" />
-        </View>
+        <>
+          {/*
+            Say plainly whether the shop can see this parcel.
+            Reporting used to fail silently when location was switched off, so a
+            rider with it denied looked exactly like one reporting fine and
+            nobody found out until a customer rang to ask.
+          */}
+          {tracking.state === 'denied' ? (
+            <Card background={colors.warningLight} style={styles.tracking}>
+              <Icon name="location_off" size={20} color={colors.warningDark} />
+              <View style={styles.flex}>
+                <Text variant="labelMd" weight="bold" color={colors.warningDark}>
+                  Location is off
+                </Text>
+                <Text variant="captionSm" color={colors.onSurface}>
+                  The shop cannot see where this parcel is, and the customer is not
+                  being told it is on the way.
+                </Text>
+              </View>
+              <Button label="Turn on" size="sm" onPress={() => void tracking.grant()} />
+            </Card>
+          ) : tracking.state === 'failing' ? (
+            <Card background={colors.dangerLight} style={styles.tracking}>
+              <Icon name="cloud_off" size={20} color={colors.error} />
+              <Text variant="captionSm" color={colors.onSurface} style={styles.flex}>
+                No signal — position not reaching the shop. It will catch up on its own.
+              </Text>
+            </Card>
+          ) : null}
+
+          <View style={styles.hint}>
+            <Badge
+              label={tracking.state === 'reporting' ? 'On the way · sharing position' : 'On the way'}
+              tint="info"
+              icon="local_shipping"
+            />
+          </View>
+        </>
       ) : null}
     </Screen>
   );
@@ -308,4 +343,10 @@ const styles = StyleSheet.create({
   item: { flexDirection: 'row', alignItems: 'center', gap: spacing.base },
   primary: { gap: spacing.stackMedium, marginTop: spacing.insetPage },
   hint: { alignItems: 'center', marginTop: spacing.insetCard },
+  tracking: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.insetCard,
+    marginTop: spacing.insetCard,
+  },
 });

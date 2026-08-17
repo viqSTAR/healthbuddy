@@ -433,13 +433,24 @@ const forRecipient = <
     stage,
     stageText: STAGE_TEXT[stage],
     riderOnBoard: assignedAgentUserId !== null,
-    /** Named places, oldest first. Empty until the parcel is actually moving. */
-    journey: (places ?? []).map((p) => ({
-      place: p.locality ?? p.city ?? p.street ?? 'On the way',
-      street: p.street,
-      city: p.city,
-      at: p.createdAt,
-    })),
+    /**
+     * Named places, oldest first. Empty until the parcel is actually moving.
+     *
+     * Consecutive rows that would read the same are folded together. A parcel
+     * crossing several streets of one suburb is recorded street by street, which
+     * is what operations want, but the patient is shown the suburb — so without
+     * this the trail lists "Bandra West" four times over and reads like a stuck
+     * parcel rather than a moving one. The kept time is the earliest of the run,
+     * which is when it actually reached there.
+     */
+    journey: (places ?? [])
+      .map((p) => ({
+        place: p.locality ?? p.city ?? p.street ?? 'On the way',
+        street: p.street,
+        city: p.city,
+        at: p.createdAt,
+      }))
+      .filter((leg, i, all) => i === 0 || all[i - 1]!.place !== leg.place),
   };
 };
 

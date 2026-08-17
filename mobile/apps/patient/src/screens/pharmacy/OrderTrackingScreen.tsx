@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useEffect } from 'react';
+import { AppState, View, StyleSheet } from 'react-native';
 import {
   Card,
   ErrorState,
@@ -31,10 +31,62 @@ export const OrderTrackingScreen: React.FC<{ navigation: any; route: any }> = ({
   route,
 }) => {
   const { orderId } = route.params;
-  const { data: order, loading, error, reload, refreshing, refresh } = useAsync(
+  const { data: order, loading, error, reload, refreshing, refresh, setData } = useAsync(
     () => fetchMedicineOrder(orderId),
     [orderId]
   );
+
+  /**
+   * Keeps a moving parcel moving on screen.
+   *
+   * This is the screen someone sits on while waiting for the door, and the two
+   * things it shows — the stage line and the places passed through — both change
+   * without any action from them, so leaving it to pull-to-refresh means a
+   * parcel that has already reached the next suburb looks stuck.
+   *
+   * Deliberately quiet: it writes straight to the data rather than going through
+   * `refresh`, so no spinner appears and nothing blanks. It only runs while the
+   * order is actually in motion and the app is in front, so a delivered order or
+   * a pocketed phone costs nothing.
+   */
+  const settled = order?.status === 'DELIVERED' || order?.status === 'CANCELLED';
+  useEffect(() => {
+    if (settled) return;
+
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const fresh = await fetchMedicineOrder(orderId);
+        if (!cancelled) setData(fresh);
+      } catch {
+        // A missed poll is invisible and the next is 20 seconds away; showing an
+        // error over a screen that is already displaying the truth would be worse.
+      }
+    };
+
+    const start = () => {
+      if (!timer) timer = setInterval(() => void poll(), 20_000);
+    };
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    };
+
+    start();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return stop();
+      void poll();
+      start();
+    });
+
+    return () => {
+      cancelled = true;
+      stop();
+      sub.remove();
+    };
+  }, [orderId, settled, setData]);
 
   if (loading) {
     return (
@@ -200,8 +252,23 @@ export const OrderTrackingScreen: React.FC<{ navigation: any; route: any }> = ({
                         >
                           {stage.label}
                         </Text>
-                        <Text variant="captionSm" color={colors.captionGray}>
-                          {stage.caption}
+                        {/*
+                          The row the parcel is actually on says what is
+                          happening now; the rest keep their fixed caption.
+
+                          The server tells six stages apart where this timeline
+                          has four dots — packed-and-waiting from rider-coming,
+                          out-for-delivery from arriving-soon. Reading the
+                          server's line here is what makes that difference
+                          visible, instead of a parcel two streets away sharing
+                          "On the way to you" with one that just left the shop.
+                        */}
+                        <Text
+                          variant="captionSm"
+                          weight={i === stageIndex ? 'medium' : 'regular'}
+                          color={i === stageIndex ? colors.onSurface : colors.captionGray}
+                        >
+                          {i === stageIndex ? parcel.stageText ?? stage.caption : stage.caption}
                         </Text>
                       </View>
                     </View>
