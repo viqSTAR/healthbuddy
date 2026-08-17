@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, Linking } from 'react-native';
+import React from 'react';
+import { View, StyleSheet } from 'react-native';
 import {
   Alert,
   Avatar,
@@ -12,7 +12,6 @@ import {
   ErrorState,
   fetchDoctorQueue,
   Icon,
-  joinConsultation,
   ListRow,
   Loading,
   Screen,
@@ -38,33 +37,21 @@ export const ConsultationScreen: React.FC<{ route: any; navigation: any }> = ({
   const queue = useAsync(fetchDoctorQueue, []);
   const appointment = (queue.data ?? []).find((a) => a.id === appointmentId);
 
-  const [joining, setJoining] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
 
   /**
-   * The doctor opening the room is what starts the consultation, so this call
-   * also flips the appointment to in progress server-side.
+   * The doctor opening the room is what starts the consultation, so the join
+   * call also flips the appointment to in progress server-side. That happens
+   * on the call screen rather than here, so a grant is not spent by a tap that
+   * then fails to reach the room.
    *
-   * The room opens in the system browser — no native module, so it works in
-   * Expo Go. When no transport is configured the server returns a reason
-   * instead of a URL, and that reason is shown rather than swallowed.
+   * The room used to open in the system browser; it now runs inside the app,
+   * with the browser kept as a fallback on the call screen itself.
    */
-  const startCall = async () => {
-    setJoining(true);
-    try {
-      const session = await joinConsultation(appointmentId);
-      if (session.url) {
-        setNotice(null);
-        await Linking.openURL(session.url);
-        queue.reload();
-      } else {
-        setNotice(session.notice ?? 'No video transport is configured.');
-      }
-    } catch (err) {
-      Alert.alert('Cannot start the call', errorMessage(err));
-    } finally {
-      setJoining(false);
-    }
+  const startCall = () => {
+    navigation.navigate('VideoCall', {
+      appointmentId,
+      counterpartName: appointment?.patient?.fullName,
+    });
   };
 
   const endCall = () =>
@@ -168,17 +155,10 @@ export const ConsultationScreen: React.FC<{ route: any; navigation: any }> = ({
               </View>
             </View>
 
-            {notice ? (
-              <Text variant="captionSm" color={colors.warningDark}>
-                {notice}
-              </Text>
-            ) : null}
-
             <Button
               label="Start video consultation"
               icon="videocam"
-              loading={joining}
-              onPress={() => void startCall()}
+              onPress={startCall}
               fullWidth
             />
             <Button

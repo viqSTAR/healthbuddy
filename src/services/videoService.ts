@@ -3,6 +3,7 @@ import { prisma } from '../config/db.js';
 import { env } from '../config/env.js';
 import { AppError, notFound } from '../utils/AppError.js';
 import { logger } from '../utils/logger.js';
+import { minutesUntilSlot } from '../utils/clock.js';
 import { recordAudit } from './auditService.js';
 
 /**
@@ -146,17 +147,22 @@ const providers: Record<string, VideoProvider> = {
 const activeProvider = (): VideoProvider => providers[env.VIDEO_PROVIDER] ?? mockVideoProvider;
 
 /**
- * The booked instant, from the slot's `YYYY-MM-DD` and `HH:mm` strings.
+ * How far off the booked instant is, in minutes. Negative once it has begun.
  *
- * These carry no zone, so they are read in the server's local time — set TZ on
- * the deployment (Asia/Kolkata for an India launch) or a consultation booked
- * for 10:00 opens at the wrong hour.
+ * Read through the platform clock rather than `new Date(y, m, d, hh, mm)`,
+ * which builds the instant in the server's own zone. A slot's `10:00` means
+ * ten in the morning where the clinic is, and `clock.ts` makes exactly that
+ * argument for every other slot decision on the platform — this was the one
+ * place that did not follow it, so on any deployment not running
+ * TZ=Asia/Kolkata (a default container is UTC) the join window sat five and a
+ * half hours away from the consultation. Patients would be told their call
+ * "opens at 10:00" while standing in it, and the room would unlock in the
+ * middle of the night.
  */
-const slotStartsAt = (date: string, startTime: string): Date | null => {
-  const [y, m, d] = date.split('-').map(Number);
-  const [hh, mm] = startTime.split(':').map(Number);
-  if ([y, m, d, hh, mm].some((n) => !Number.isFinite(n))) return null;
-  return new Date(y!, m! - 1, d!, hh!, mm!, 0, 0);
+const minutesToSlot = (date: string, startTime: string): number | null => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(startTime)) return null;
+  const minutes = minutesUntilSlot(date, startTime);
+  return Number.isFinite(minutes) ? minutes : null;
 };
 
 export interface JoinInput {
@@ -197,25 +203,24 @@ export const joinConsultationService = async (input: JoinInput): Promise<VideoSe
     throw new AppError('This consultation has already ended.', 409);
   }
 
-  const startsAt = slotStartsAt(appointment.slot.date, appointment.slot.startTime);
-  const opensAt = startsAt
-    ? new Date(startsAt.getTime() - env.VIDEO_JOIN_LEAD_MINUTES * 60_000)
-    : null;
-  const closesAt = startsAt
-    ? new Date(startsAt.getTime() + env.VIDEO_JOIN_GRACE_MINUTES * 60_000)
-    : null;
+  const untilStart = minutesToSlot(appointment.slot.date, appointment.slot.startTime);
   const now = new Date();
+  /** When the grant lapses. Past the grace period, or an hour out if unknown. */
+  const closesAt =
+    untilStart === null
+      ? new Date(now.getTime() + 3600_000)
+      : new Date(now.getTime() + (untilStart + env.VIDEO_JOIN_GRACE_MINUTES) * 60_000);
 
   // An in-progress consultation stays joinable past the window — a call that
   // overruns must not eject the two people having it.
-  if (appointment.status !== 'IN_PROGRESS' && opensAt && closesAt) {
-    if (now < opensAt) {
+  if (appointment.status !== 'IN_PROGRESS' && untilStart !== null) {
+    if (untilStart > env.VIDEO_JOIN_LEAD_MINUTES) {
       throw new AppError(
         `This consultation opens at ${appointment.slot.startTime} on ${appointment.slot.date}. You can join from ${env.VIDEO_JOIN_LEAD_MINUTES} minutes before.`,
         425
       );
     }
-    if (now > closesAt) {
+    if (untilStart < -env.VIDEO_JOIN_GRACE_MINUTES) {
       throw new AppError('The window for this consultation has passed.', 410);
     }
   }
@@ -232,7 +237,7 @@ export const joinConsultationService = async (input: JoinInput): Promise<VideoSe
     });
   }
 
-  const expiresAt = closesAt && closesAt > now ? closesAt : new Date(now.getTime() + 3600_000);
+  const expiresAt = closesAt > now ? closesAt : new Date(now.getTime() + 3600_000);
 
   const displayName = isDoctor
     ? `Dr. ${appointment.doctor.name}`.replace(/^Dr\. Dr\.?\s*/i, 'Dr. ')

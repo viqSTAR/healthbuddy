@@ -10,6 +10,7 @@ import {
   NotificationsScreen,
   ChatThreadsScreen,
   ChatConversationScreen,
+  VideoCallScreen,
   type AppNotification,
 } from '@healthbuddy/shared';
 
@@ -52,7 +53,6 @@ import { EmergencySosScreen } from '../screens/emergency/EmergencySosScreen';
 
 // Consultation
 import { JoinLobbyScreen } from '../screens/consult/JoinLobbyScreen';
-import { VideoConsultationScreen } from '../screens/consult/VideoConsultationScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -147,11 +147,12 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="VisitDetail" component={VisitDetailScreen} />
 
             <Stack.Screen name="JoinLobby" component={JoinLobbyScreen} />
-            <Stack.Screen
-              name="VideoConsultation"
-              component={VideoConsultationScreen}
-              options={{ animation: 'fade' }}
-            />
+            {/* The consultation itself. Was a shell with no transport. */}
+            <Stack.Screen name="VideoConsultation" options={{ animation: 'fade' }}>
+              {({ navigation, route }) => (
+                <VideoCallScreen navigation={navigation} route={route} role="PATIENT" />
+              )}
+            </Stack.Screen>
             {/* Follow-up messaging, opened by the server when a consultation completes. */}
             <Stack.Screen name="Messages">
               {({ navigation }) => <ChatThreadsScreen navigation={navigation} role="PATIENT" />}

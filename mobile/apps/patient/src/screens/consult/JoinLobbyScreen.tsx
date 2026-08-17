@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Pressable, Linking } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import {
-  Alert,
   Avatar,
   Badge,
   Button,
   Card,
   colors,
-  errorMessage,
   Icon,
-  joinConsultation,
   radius,
   Screen,
   spacing,
@@ -22,47 +19,46 @@ export const JoinLobbyScreen: React.FC<{ navigation: any; route: any }> = ({
   navigation,
   route,
 }) => {
-  const { appointment } = route.params ?? {};
+  /**
+   * Reached two ways, and it has to survive both.
+   *
+   * The confirmation screen has the whole appointment to hand and passes it;
+   * Home, Records and the visit page only have an id. This read `appointment`
+   * alone, so three of the four ways into a consultation crashed on
+   * `appointment.id` before anyone reached the room.
+   */
+  const { appointment, appointmentId } = (route.params ?? {}) as {
+    appointment?: {
+      id: string;
+      meetingRoomId?: string | null;
+      doctor?: { name?: string; specialty?: string };
+      slot?: { date: string; startTime: string };
+    };
+    appointmentId?: string;
+  };
+  const id = appointment?.id ?? appointmentId;
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
   const [joining, setJoining] = useState(false);
 
   /**
-   * Asks the server for a join grant, then opens the room.
+   * Goes into the consultation.
    *
-   * The room opens in the system browser rather than a WebView: camera and
-   * microphone permissions are reliable there on both platforms, and it needs
-   * no native module, so this works in Expo Go today. A dev build with a native
-   * WebRTC SDK is the production upgrade, not a prerequisite for testing.
-   *
-   * When no transport is configured the server says so, and we fall back to the
-   * in-app call shell rather than opening nothing.
+   * The call screen asks for the grant itself, so the lobby does not fetch one
+   * only to throw it away — a join grant is time-boxed, and spending one here
+   * would start the clock before anybody is in the room. This used to hand the
+   * URL to the system browser; the room now runs inside the app, with the
+   * browser kept as the fallback when a device's WebView cannot get camera
+   * access.
    */
-  const join = async () => {
+  const join = () => {
+    if (!id) return;
     setJoining(true);
-    try {
-      const session = await joinConsultation(appointment.id);
-
-      if (session.url) {
-        const opened = await Linking.canOpenURL(session.url);
-        if (!opened) throw new Error('No browser is available to open the consultation.');
-        await Linking.openURL(session.url);
-        return;
-      }
-
-      navigation.replace('VideoConsultation', {
-        appointment,
-        micOn,
-        cameraOn,
-        notice: session.notice,
-      });
-    } catch (err) {
-      // The server refuses early joins and expired windows with a reason worth
-      // showing verbatim — "opens at 10:00" is more use than "failed".
-      Alert.alert('Cannot join yet', errorMessage(err));
-    } finally {
-      setJoining(false);
-    }
+    navigation.replace('VideoConsultation', {
+      appointmentId: id,
+      ...(appointment?.doctor?.name ? { counterpartName: appointment.doctor.name } : {}),
+    });
+    setJoining(false);
   };
 
   return (

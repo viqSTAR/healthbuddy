@@ -10,6 +10,7 @@ import {
   NotificationsScreen,
   OtpVerificationScreen,
   VerificationStatus,
+  VideoCallScreen,
   colors,
   useAuth,
   useProviderApplication,
@@ -48,6 +49,10 @@ const DoctorConversation: React.FC<{ navigation: any; route: any }> = ({ navigat
   <ChatConversationScreen navigation={navigation} route={route} role="DOCTOR" />
 );
 
+const DoctorCall: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => (
+  <VideoCallScreen navigation={navigation} route={route} role="DOCTOR" />
+);
+
 const DoctorTabs = () => (
   <Tab.Navigator tabBar={(props) => <BottomNav {...props} />} screenOptions={{ headerShown: false }}>
     <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ tabBarLabel: 'Today' }} />
@@ -69,6 +74,7 @@ const DoctorStack = () => (
     <Stack.Screen name="Tabs" component={DoctorTabs} />
     <Stack.Screen name="Consultation" component={ConsultationScreen} />
     <Stack.Screen name="Prescribe" component={PrescribeScreen} />
+    <Stack.Screen name="VideoCall" component={DoctorCall} options={{ animation: 'fade' }} />
     <Stack.Screen name="ChatConversation" component={DoctorConversation} />
     {/* A tapped notification has to land on the thing it is about. */}
     <Stack.Screen name="Notifications">

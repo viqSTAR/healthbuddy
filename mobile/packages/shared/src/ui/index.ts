@@ -20,11 +20,13 @@ export { NotificationsScreen } from './NotificationsScreen';
 export { EarningsScreen } from './EarningsScreen';
 export { ChatThreadsScreen } from './ChatThreadsScreen';
 export { ChatConversationScreen } from './ChatConversationScreen';
+export { VideoCallScreen } from './VideoCallScreen';
 
 export type { DocumentUploaderProps } from './DocumentUploader';
 export type { OtpVerificationScreenProps } from './OtpVerificationScreen';
 export type { ChatThreadsScreenProps } from './ChatThreadsScreen';
 export type { ChatConversationScreenProps } from './ChatConversationScreen';
+export type { VideoCallScreenProps } from './VideoCallScreen';
 
 export type { TextProps } from './Text';
 export type { IconProps } from './Icon';
