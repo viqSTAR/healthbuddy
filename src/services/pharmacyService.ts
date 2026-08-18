@@ -501,7 +501,7 @@ export const getPatientMedicineOrdersService = async (patientId: string) => {
     include: { shipments: shipmentView },
   });
 
-  return orders.map(({ assignedAgentUserId: _carriedBy, ...order }) => ({
+  return orders.map((order) => ({
     ...order,
     status: deriveOrderStatus(order.shipments, order.status),
     shipmentCount: order.shipments.length,
@@ -534,7 +534,6 @@ export const getPharmacyOrderQueueService = async (
     take: Math.min(limit, 200),
     include: {
       patient: { select: { id: true, fullName: true, emergencyContact: true } },
-      assignedAgent: { select: { id: true, phoneNumber: true } },
       payment: paymentView,
       // An order that came from an approved prescription is paid for as part
       // of the whole basket, so its payment hangs off the fulfilment rather
@@ -557,14 +556,8 @@ export const getPatientOrderByIdService = async (orderId: string, patientId: str
   // Return 404 rather than 403 so ids cannot be probed for existence.
   if (!order || order.patientId !== patientId) throw notFound('Order');
 
-  // `assignedAgentUserId` is the order-level rider column. It was going
-  // straight out to the customer, which names the person carrying their
-  // parcel — the parcels below already say that somebody is, which is the part
-  // that is any of their business.
-  const { assignedAgentUserId: _carriedBy, ...rest } = order;
-
   return {
-    ...rest,
+    ...order,
     status: deriveOrderStatus(order.shipments, order.status),
     shipmentCount: order.shipments.length,
     shipments: order.shipments.map(forRecipient),
@@ -605,24 +598,6 @@ export const acceptOrderService = async (orderId: string, pharmacyId: string) =>
   });
 
   return order;
-};
-
-/** Assigns delivery to a staff member; a rider app can reuse this field later. */
-export const assignOrderAgentService = async (
-  orderId: string,
-  pharmacyId: string,
-  agentUserId: string | null
-) => {
-  const order = await prisma.medicineOrder.findUnique({
-    where: { id: orderId },
-    select: { id: true, pharmacyId: true },
-  });
-  if (!order || order.pharmacyId !== pharmacyId) throw notFound('Order');
-
-  return prisma.medicineOrder.update({
-    where: { id: orderId },
-    data: { assignedAgentUserId: agentUserId },
-  });
 };
 
 const ORDER_STATUS_TIMESTAMPS: Partial<Record<OrderStatus, 'dispatchedAt' | 'deliveredAt'>> = {

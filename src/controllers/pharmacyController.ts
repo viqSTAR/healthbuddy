@@ -7,7 +7,6 @@ import {
   getPharmacyOrderQueueService,
   getPatientOrderByIdService,
   acceptOrderService,
-  assignOrderAgentService,
   updateOrderStatusService,
   getMyPharmacyProfileService,
   type PlaceOrderInput,
@@ -68,16 +67,6 @@ export const acceptOrderHandler = asyncHandler(async (req: AuthenticatedRequest,
   const order = await acceptOrderService(id, pharmacyId);
   res.status(200).json({ success: true, message: 'Order accepted.', order });
 });
-
-export const assignOrderAgentHandler = asyncHandler(
-  async (req: AuthenticatedRequest, res: Response) => {
-    const pharmacyId = requirePharmacyId(req);
-    const { id } = req.params as { id: string };
-    const { agentUserId } = req.body as { agentUserId: string | null };
-    const order = await assignOrderAgentService(id, pharmacyId, agentUserId);
-    res.status(200).json({ success: true, order });
-  }
-);
 
 export const updateOrderStatusHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const pharmacyId = requirePharmacyId(req);

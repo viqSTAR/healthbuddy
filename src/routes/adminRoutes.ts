@@ -5,6 +5,7 @@ import {
   listUsersHandler,
   setUserSuspendedHandler,
   listAuditLogsHandler,
+  listAuditActionsHandler,
 } from '../controllers/adminController.js';
 import {
   getOverviewHandler,
@@ -82,7 +83,7 @@ router.get(
   '/users',
   validate({
     query: paginationSchema.extend({
-      role: z.enum(['PATIENT', 'DOCTOR', 'LAB_PARTNER', 'PHARMACY', 'ADMIN']).optional(),
+      role: z.enum(['PATIENT', 'DOCTOR', 'LAB_PARTNER', 'PHARMACY', 'DELIVERY_AGENT', 'ADMIN']).optional(),
     }),
   }),
   listUsersHandler
@@ -98,6 +99,8 @@ router.patch(
 );
 
 /** The privileged-action log — role grants, application decisions, PHI reads. */
+router.get('/audit/actions', listAuditActionsHandler);
+
 router.get(
   '/audit',
   validate({
@@ -337,7 +340,11 @@ router.post(
   '/orders/:id/agent',
   validate({
     params: idParam,
-    body: z.object({ agentUserId: uuidSchema.nullable() }),
+    body: z.object({
+      agentUserId: uuidSchema.nullable(),
+      /** One parcel, when an order is being split between riders. */
+      shipmentId: uuidSchema.optional(),
+    }),
   }),
   assignAgentHandler
 );

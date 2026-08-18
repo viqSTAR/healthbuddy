@@ -352,7 +352,6 @@ model User {
   notifications        Notification[]
   payments             Payment[]
   auditLogs            AuditLog[]
-  assignedOrders       MedicineOrder[]       @relation("OrderAgent")
   assignedShipments    Shipment[]            @relation("ShipmentAgent")
   chatMessages         ChatMessage[]         @relation("ChatSender")
   assignedLabOrders    LabOrder[]            @relation("LabOrderAgent")
@@ -1068,10 +1067,14 @@ model MedicineOrder {
   fulfilmentId   String?
   fulfilment     PrescriptionFulfilment? @relation(fields: [fulfilmentId], references: [id])
 
-  /// Partner staff today; a dedicated rider app can consume the same field
-  /// later without a migration.
-  assignedAgentUserId String?
-  assignedAgent       User?     @relation("OrderAgent", fields: [assignedAgentUserId], references: [id])
+  /// There is deliberately no rider on the order.
+  ///
+  /// A rider carries a parcel, and an order filled by two shops has two of
+  /// them, so there was never one answer to store here. This column existed for
+  /// a while and nothing wrote it once riders began claiming parcels from the
+  /// pool — which made the dispatch board read every order as uncarried and let
+  /// an operator press Assign on a field no rider app looked at. Who is
+  /// carrying what lives on `Shipment.assignedAgentUserId`.
   acceptedAt          DateTime?
   dispatchedAt        DateTime?
   deliveredAt         DateTime?
@@ -1093,7 +1096,6 @@ model MedicineOrder {
 
   @@index([patientId])
   @@index([pharmacyId, status])
-  @@index([assignedAgentUserId])
 }
 
 /// The part of an order one pharmacy is responsible for.

@@ -66,3 +66,20 @@ export const listAuditLogsService = async (params: {
 
   return { total, page: params.page, limit: params.limit, logs };
 };
+
+/**
+ * Every action kind that has actually been recorded, for the filter.
+ *
+ * Read from the log rather than listed in the panel. A hardcoded list drifts the
+ * moment anything new is audited — the filter offered seven actions while the
+ * log held twenty, so an operator could not filter to the ones a rider or a
+ * dispatcher generates, which are precisely the ones worth reviewing.
+ */
+export const listAuditActionsService = async () => {
+  const rows = await prisma.auditLog.groupBy({
+    by: ['action'],
+    _count: { _all: true },
+    orderBy: { action: 'asc' },
+  });
+  return rows.map((r) => ({ action: r.action, count: r._count._all }));
+};

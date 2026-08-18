@@ -4,7 +4,7 @@ import { fetchUsers, setUserSuspended, type AdminUser, type Role } from '../api/
 import { useAuth } from '../api/auth';
 import { Badge, EmptyState, ErrorState, Loading, formatDate, useAsync } from '../components/ui';
 
-const ROLES: Role[] = ['PATIENT', 'DOCTOR', 'PHARMACY', 'LAB_PARTNER', 'ADMIN'];
+const ROLES: Role[] = ['PATIENT', 'DOCTOR', 'PHARMACY', 'LAB_PARTNER', 'DELIVERY_AGENT', 'ADMIN'];
 
 const displayName = (user: AdminUser): string =>
   user.patient?.fullName ??

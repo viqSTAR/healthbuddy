@@ -309,12 +309,18 @@ export const getDeliveryBoardHandler = asyncHandler(
 export const assignAgentHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const actor = requireUser(req);
   const { id } = req.params as { id: string };
-  const { agentUserId } = req.body as { agentUserId: string | null };
+  const { agentUserId, shipmentId } = req.body as {
+    agentUserId: string | null;
+    shipmentId?: string;
+  };
 
   const order = await assignDeliveryAgentService({
     actorUserId: actor.userId,
     orderId: id,
     agentUserId,
+    // Absent means every open parcel on the order, which is what an operator
+    // handing over a single-parcel order expects.
+    ...(shipmentId ? { shipmentId } : {}),
     ipAddress: req.ip ?? null,
   });
 

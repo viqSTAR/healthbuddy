@@ -1,6 +1,6 @@
 import { api, API_BASE_URL } from './client';
 
-export type Role = 'PATIENT' | 'DOCTOR' | 'LAB_PARTNER' | 'PHARMACY' | 'ADMIN';
+export type Role = 'PATIENT' | 'DOCTOR' | 'LAB_PARTNER' | 'PHARMACY' | 'DELIVERY_AGENT' | 'ADMIN';
 export type ApplicationType = 'DOCTOR' | 'PHARMACY' | 'LAB';
 export type ApplicationStatus = 'DRAFT' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED';
 
@@ -190,6 +190,11 @@ export const setUserSuspended = async (id: string, suspended: boolean, reason?: 
 
 /* ---------- Audit ---------- */
 
+/** Action kinds actually present in the log, with how many of each. */
+export const fetchAuditActions = async () =>
+  (await api.get<{ actions: { action: string; count: number }[] }>('/admin/audit/actions')).data
+    .actions;
+
 export const fetchAuditLogs = async (params?: {
   entityType?: string;
   action?: string;
@@ -331,12 +336,17 @@ export interface Overview {
     abandonedCheckouts: number;
     lowStockLines: number;
     expiringStockLines: number;
+    unverifiedRiders: number;
+    parcelsAwaitingRider: number;
+    consultsUnpaid: number;
   };
   people: {
     patients: number;
     doctors: number;
     pharmacies: number;
     labs: number;
+    riders: number;
+    ridersOnShift: number;
     suspended: number;
     signupsThisWeek: number;
   };
@@ -698,6 +708,37 @@ export const fetchAppointments = async (params?: {
 
 /* ---------- Medicine orders ---------- */
 
+/** A rider as the panel shows them: a name first, a number to ring second. */
+export interface Rider {
+  /** The USER id — what an assignment stores. */
+  id: string;
+  name: string | null;
+  phoneNumber: string;
+  vehicleNumber: string | null;
+  parcels: number;
+}
+
+/** Where a rider was last seen. Coordinates are operations-only, by design. */
+export interface LastSeen {
+  latitude: number;
+  longitude: number;
+  at: string | null;
+  /** The name their phone resolved for those coordinates, when it could. */
+  place: string | null;
+  street: string | null;
+}
+
+/** One shop's part of an order — the unit a rider actually carries. */
+export interface Parcel {
+  id: string;
+  status: string;
+  pharmacy: string;
+  rider: Omit<Rider, 'parcels'> | null;
+  lastSeen: LastSeen | null;
+  trail: { place: string; street: string | null; latitude: number; longitude: number; at: string }[];
+  nearlyThere: boolean;
+}
+
 export interface PaymentBrief {
   id: string;
   status: string;
@@ -719,8 +760,15 @@ export interface OrderRow {
   cancelReason: string | null;
   patient: { id: string; fullName: string; user: { phoneNumber: string } };
   pharmacy: { id: string; name: string; city: string | null } | null;
-  assignedAgent: { id: string; phoneNumber: string; role: Role } | null;
   payment: PaymentBrief | null;
+  /** True when the payment covers a whole prescription basket, not this order. */
+  paidAsBasket: boolean;
+  /**
+   * Who is carrying it, read off the parcels — an order filled by two shops has
+   * two riders, so there is no single answer and the API does not pretend one.
+   */
+  riders: Rider[];
+  shipments: Parcel[];
 }
 
 export const fetchOrders = async (params?: {
@@ -778,8 +826,24 @@ export const fetchOrder = async (id: string) =>
 export const cancelOrder = async (id: string, reason: string) =>
   (await api.post<{ order: OrderRow }>(`/admin/orders/${id}/cancel`, { reason })).data.order;
 
-export const assignOrderAgent = async (id: string, agentUserId: string | null) =>
-  (await api.post<{ order: OrderRow }>(`/admin/orders/${id}/agent`, { agentUserId })).data.order;
+/**
+ * Hands over the parcels, not the order.
+ *
+ * Without `shipmentId` every open parcel goes to that rider, which is what an
+ * operator means for a single-shop order; pass one to split an order between
+ * two riders.
+ */
+export const assignOrderAgent = async (
+  id: string,
+  agentUserId: string | null,
+  shipmentId?: string
+) =>
+  (
+    await api.post<{ order: OrderRow }>(`/admin/orders/${id}/agent`, {
+      agentUserId,
+      ...(shipmentId ? { shipmentId } : {}),
+    })
+  ).data.order;
 
 /* ---------- Lab orders ---------- */
 
@@ -823,6 +887,10 @@ export type DeliveryStage = 'PLACED' | 'ACCEPTED' | 'PROCESSING' | 'DISPATCHED';
 export interface DeliveryJob extends OrderRow {
   minutesInStage: number;
   stalled: boolean;
+  /** Each parcel with its own rider and its own last known position. */
+  parcels: Parcel[];
+  /** Packed parcels nobody has taken. */
+  awaitingRider: number;
 }
 
 export interface DeliveryBoard {
@@ -838,9 +906,21 @@ export interface DeliveryBoard {
     labPartner: { id: string; name: string } | null;
     assignedAgent: { id: string; phoneNumber: string } | null;
   }[];
-  agents: { id: string; phoneNumber: string; orders: number; oldestMinutes: number }[];
+  /** Riders on shift or holding a parcel, and where each of them is. */
+  fleet: {
+    id: string;
+    name: string;
+    phoneNumber: string;
+    vehicleNumber: string | null;
+    onShift: boolean;
+    parcels: number;
+    carrying: number;
+    oldestMinutes: number;
+    lastSeen: LastSeen | null;
+  }[];
   unassigned: number;
   stalled: number;
+  idleRiders: number;
 }
 
 export const fetchDeliveryBoard = async (params?: { pharmacyId?: string; agentUserId?: string }) =>

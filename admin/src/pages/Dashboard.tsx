@@ -79,6 +79,27 @@ const alertsFrom = (o: Overview): Alert[] =>
         to: '/appointments',
         tone: 'warning',
       },
+      {
+        label: 'Parcels with no rider',
+        value: o.attention.parcelsAwaitingRider,
+        hint: 'Packed and sitting in the pool',
+        to: '/deliveries',
+        tone: 'warning',
+      },
+      {
+        label: 'Consultations never paid for',
+        value: o.attention.consultsUnpaid,
+        hint: 'Completed with no payment on record',
+        to: '/appointments?status=COMPLETED',
+        tone: 'warning',
+      },
+      {
+        label: 'Riders waiting to be verified',
+        value: o.attention.unverifiedRiders,
+        hint: 'Signed up and unable to earn until someone checks them',
+        to: '/agents',
+        tone: 'warning',
+      },
     ] as Alert[]
   )
     .filter((a) => a.value > 0)
@@ -202,6 +223,12 @@ export const Dashboard: React.FC = () => {
                   onClick={() => navigate('/pharmacies')}
                 />
                 <Stat label="Labs" value={o.people.labs} onClick={() => navigate('/labs')} />
+                <Stat
+                  label="Delivery riders"
+                  value={o.people.riders}
+                  hint={`${o.people.ridersOnShift} on shift now`}
+                  onClick={() => navigate('/agents')}
+                />
                 <Stat label="Joined this week" value={o.people.signupsThisWeek} />
                 <Stat
                   label="Suspended accounts"

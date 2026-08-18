@@ -869,3 +869,77 @@ form.card > label {
   color: var(--caption);
   margin: 0 0 12px;
 }
+
+/* ---------- Where the riders are ---------- */
+
+/*
+ * Coordinates live on this screen and nowhere else in the product. The name is
+ * what a dispatcher reads out on the phone; the numbers are what they paste
+ * into a map when the name is a suburb three kilometres wide.
+ */
+.sub {
+  display: block;
+  color: var(--caption);
+  font-size: 12px;
+}
+.sub.warn,
+.warn {
+  color: var(--warning-dark, #8a5a00);
+}
+.position {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.position > span:first-child {
+  font-weight: 600;
+  color: var(--on-surface);
+}
+.position a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.position a:hover {
+  text-decoration: underline;
+}
+.parcel {
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--surface-lowest);
+}
+.parcel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.trail {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.trail summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-weight: 600;
+}
+.trail ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.trail li > span:first-child {
+  font-weight: 600;
+  color: var(--on-surface);
+}
+.trail a {
+  color: var(--caption);
+  text-decoration: none;
+}
+.trail a:hover {
+  text-decoration: underline;
+}

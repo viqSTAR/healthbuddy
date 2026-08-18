@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import { getAdminStatsService, listUsersService, setUserSuspendedService } from '../services/adminService.js';
-import { listAuditLogsService } from '../services/auditService.js';
+import { listAuditLogsService, listAuditActionsService } from '../services/auditService.js';
 import { asyncHandler, requireUser, type AuthenticatedRequest } from '../middlewares/auth.js';
 
 export const getAdminStatsHandler = asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
@@ -57,3 +57,8 @@ export const listAuditLogsHandler = asyncHandler(
     res.status(200).json({ success: true, ...result });
   }
 );
+
+/** The action kinds present in the log, so the filter cannot go stale. */
+export const listAuditActionsHandler = asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+  res.status(200).json({ success: true, actions: await listAuditActionsService() });
+});

@@ -1041,8 +1041,27 @@ const settleCodPayment = async (orderId: string, actorUserId: string | null) => 
  * server can, and until it did this, a cash order that arrived in two boxes was
  * never marked paid by anyone and its pharmacies were never settled.
  */
-export const settleCodOnFinalDeliveryService = (orderId: string) =>
-  settleCodPayment(orderId, null);
+export const settleCodOnFinalDeliveryService = async (orderId: string) => {
+  /**
+   * Most orders are prepaid, and delivering one is not an error.
+   *
+   * The shipment service calls this on every final delivery and logs whatever
+   * comes back as a failure, so a plain prepaid order was writing an ERROR line
+   * on its happy path. An error log that fires on the common case is how a real
+   * one goes unread.
+   */
+  const order = await prisma.medicineOrder.findUnique({
+    where: { id: orderId },
+    select: {
+      payment: { select: { method: true } },
+      fulfilment: { select: { payment: { select: { method: true } } } },
+    },
+  });
+  const method = order?.payment?.method ?? order?.fulfilment?.payment?.method ?? null;
+  if (method !== 'COD') return null;
+
+  return settleCodPayment(orderId, null);
+};
 
 /**
  * The delivery agent or pharmacy confirms the cash actually arrived.
@@ -1057,9 +1076,10 @@ export const markCodCollectedService = async (orderId: string, actorUserId: stri
   const order = await prisma.medicineOrder.findUnique({
     where: { id: orderId },
     select: {
-      assignedAgentUserId: true,
       pharmacy: { select: { userId: true } },
-      shipments: { select: { pharmacy: { select: { userId: true } } } },
+      shipments: {
+        select: { assignedAgentUserId: true, pharmacy: { select: { userId: true } } },
+      },
     },
   });
   if (!order) throw notFound('Order');
@@ -1067,7 +1087,10 @@ export const markCodCollectedService = async (orderId: string, actorUserId: stri
   const isPharmacy =
     order.pharmacy?.userId === actorUserId ||
     order.shipments.some((s) => s.pharmacy.userId === actorUserId);
-  const isAgent = order.assignedAgentUserId === actorUserId;
+  // The rider is on the parcel, not the order. Checking the order's own column
+  // meant this branch could never match once riders began claiming parcels from
+  // the pool, so the person actually holding the cash was refused.
+  const isAgent = order.shipments.some((s) => s.assignedAgentUserId === actorUserId);
   if (!isPharmacy && !isAgent) throw notFound('Order');
 
   const settled = await settleCodPayment(orderId, actorUserId);

@@ -6,6 +6,8 @@ import {
   fetchDeliveryBoard,
   type DeliveryJob,
   type DeliveryStage,
+  type LastSeen,
+  type Parcel,
 } from '../api/endpoints';
 import {
   Drawer,
@@ -24,20 +26,19 @@ import {
 /**
  * The dispatch board.
  *
- * There is no rider identity on this platform. `assignedAgentUserId` on an
- * order points at whichever partner-staff account picked the job up, which is
- * what the partner apps already write to. So this board tracks delivery WORK,
- * and the roster below it is derived from who is actually carrying orders
- * rather than read from a riders table that does not exist.
+ * A rider carries a parcel, not an order: an order filled by two shops is two
+ * parcels, two riders and two positions. This board used to read an order-level
+ * rider column that nothing wrote once riders started claiming parcels from the
+ * pool, so every order in flight displayed as "nobody carrying it" while a fleet
+ * was out delivering, and the roster tab was permanently empty.
  *
- * A real rider role is a product, not a screen: a registration and verification
- * flow, a rider app with live location, cash-on-delivery reconciliation, and
- * shift and payout rules. Building the roster UI first would mean an empty list
- * that looks broken and a set of buttons that write to nothing.
+ * What an operator gets here is the thing that actually goes wrong in quick
+ * commerce: a parcel sitting in a lane with nobody on it. Age in stage is the
+ * primary column for exactly that reason, and the roster shows who is clocked on
+ * with an empty bag — the two halves of the same question.
  *
- * What the board does give an operator is the thing that actually goes wrong in
- * quick commerce: an order sitting in a lane with nobody on it. Age in stage is
- * the primary column for exactly that reason.
+ * Coordinates appear on this screen and nowhere else. The customer is told place
+ * names; a dispatcher needs to know which junction the rider is stuck at.
  */
 
 const LANES: { key: DeliveryStage; label: string; note: string }[] = [
@@ -47,18 +48,159 @@ const LANES: { key: DeliveryStage; label: string; note: string }[] = [
   { key: 'DISPATCHED', label: 'Out for delivery', note: 'Stock deducted, on its way' },
 ];
 
-const JobCard: React.FC<{ job: DeliveryJob; onOpen: () => void }> = ({ job, onOpen }) => (
-  <button className={`job${job.stalled ? ' stalled' : ''}`} onClick={onOpen}>
-    <div className="who">{job.patient.fullName}</div>
-    <div className="line">
-      <span>{job.pharmacy?.name ?? 'No shop yet'}</span>
-      <span>{money(job.totalAmount)}</span>
+/** How long ago a position was reported, in words. */
+const ago = (at: string | null) => {
+  if (!at) return 'never';
+  const minutes = Math.floor((Date.now() - new Date(at).getTime()) / 60_000);
+  if (minutes < 1) return 'just now';
+  return `${duration(minutes)} ago`;
+};
+
+/**
+ * A position, in text and coordinates.
+ *
+ * Both, deliberately. The name is what a dispatcher reads out to a customer on
+ * the phone; the numbers are what they paste into a map when the name is a
+ * suburb three kilometres wide.
+ */
+const Position: React.FC<{ seen: LastSeen; stale?: boolean }> = ({ seen, stale }) => (
+  <div className="position">
+    <span>{seen.place ?? 'Unnamed place'}</span>
+    {seen.street && seen.street !== seen.place ? (
+      <span className="sub">{seen.street}</span>
+    ) : null}
+    <a
+      className="mono sub"
+      href={`https://www.google.com/maps/search/?api=1&query=${seen.latitude},${seen.longitude}`}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {seen.latitude.toFixed(5)}, {seen.longitude.toFixed(5)}
+    </a>
+    <span className={`sub${stale ? ' warn' : ''}`}>Seen {ago(seen.at)}</span>
+  </div>
+);
+
+/** A fix older than this is worth flagging — the app may be closed. */
+const STALE_MINUTES = 10;
+const isStale = (at: string | null) =>
+  !at || Date.now() - new Date(at).getTime() > STALE_MINUTES * 60_000;
+
+const JobCard: React.FC<{ job: DeliveryJob; onOpen: () => void }> = ({ job, onOpen }) => {
+  const rider = job.riders[0];
+  const carrying = job.parcels.find((p) => p.lastSeen);
+
+  return (
+    <button className={`job${job.stalled ? ' stalled' : ''}`} onClick={onOpen}>
+      <div className="who">{job.patient.fullName}</div>
+      <div className="line">
+        <span>{job.pharmacy?.name ?? 'No shop yet'}</span>
+        <span>{money(job.totalAmount)}</span>
+      </div>
+      <div className="line">
+        <span>
+          {job.riders.length === 0
+            ? 'Nobody carrying it'
+            : job.riders.length > 1
+              ? `${job.riders.length} riders`
+              : rider!.name ?? rider!.phoneNumber}
+        </span>
+        <span>{duration(job.minutesInStage)}</span>
+      </div>
+      {carrying?.lastSeen ? (
+        <div className="line sub">
+          <span>{carrying.lastSeen.place ?? 'On the way'}</span>
+          <span>{ago(carrying.lastSeen.at)}</span>
+        </div>
+      ) : null}
+      {job.awaitingRider > 0 && job.riders.length > 0 ? (
+        <div className="line sub warn">
+          <span>{job.awaitingRider} parcel(s) still need a rider</span>
+        </div>
+      ) : null}
+    </button>
+  );
+};
+
+/** One parcel, with whoever has it and wherever they are. */
+const ParcelRow: React.FC<{
+  parcel: Parcel;
+  multiple: boolean;
+  busy: boolean;
+  onHandOver: (shipmentId: string) => void;
+}> = ({ parcel, multiple, busy, onHandOver }) => (
+  <div className="parcel">
+    <div className="parcel-head">
+      <div>
+        <strong>{parcel.pharmacy}</strong>
+        <span className="sub mono">#{parcel.id.slice(0, 8)}</span>
+      </div>
+      <Status value={parcel.status} />
     </div>
-    <div className="line">
-      <span>{job.assignedAgent ? job.assignedAgent.phoneNumber : 'Nobody carrying it'}</span>
-      <span>{duration(job.minutesInStage)}</span>
-    </div>
-  </button>
+
+    <Facts
+      rows={[
+        [
+          'Rider',
+          parcel.rider ? (
+            <>
+              {parcel.rider.name ?? 'Unnamed'}
+              <span className="sub mono">{parcel.rider.phoneNumber}</span>
+              {parcel.rider.vehicleNumber ? (
+                <span className="sub">{parcel.rider.vehicleNumber}</span>
+              ) : null}
+            </>
+          ) : (
+            <span className="sub">Nobody has taken this parcel</span>
+          ),
+        ],
+        [
+          'Last seen',
+          parcel.lastSeen ? (
+            <Position seen={parcel.lastSeen} stale={isStale(parcel.lastSeen.at)} />
+          ) : (
+            <span className="sub">
+              {parcel.rider
+                ? 'No position reported — the rider may have location switched off'
+                : '—'}
+            </span>
+          ),
+        ],
+        ...(parcel.nearlyThere
+          ? [['Customer told', 'Arriving soon'] as [string, React.ReactNode]]
+          : []),
+      ]}
+    />
+
+    {parcel.trail.length > 0 ? (
+      <details className="trail">
+        <summary>Route so far ({parcel.trail.length})</summary>
+        <ol>
+          {parcel.trail.map((leg) => (
+            <li key={`${leg.place}-${leg.at}`}>
+              <span>{leg.place}</span>
+              <a
+                className="mono sub"
+                href={`https://www.google.com/maps/search/?api=1&query=${leg.latitude},${leg.longitude}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {leg.latitude.toFixed(4)}, {leg.longitude.toFixed(4)}
+              </a>
+              <span className="sub">{formatDateTime(leg.at)}</span>
+            </li>
+          ))}
+        </ol>
+      </details>
+    ) : null}
+
+    {/* Only worth offering per parcel when there is more than one to split. */}
+    {multiple && parcel.status !== 'DELIVERED' && parcel.status !== 'CANCELLED' ? (
+      <button className="btn outline sm" disabled={busy} onClick={() => onHandOver(parcel.id)}>
+        Hand this parcel to someone else
+      </button>
+    ) : null}
+  </div>
 );
 
 const AssignDrawer: React.FC<{
@@ -68,13 +210,15 @@ const AssignDrawer: React.FC<{
 }> = ({ job, onClose, onChanged }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Null means every open parcel — what "give this order to Ramesh" means. */
+  const [target, setTarget] = useState<string | null>(null);
   const agents = useAsync(() => fetchAgents(), []);
 
   const assign = async (agentUserId: string | null) => {
     setBusy(true);
     setError(null);
     try {
-      await assignOrderAgent(job.id, agentUserId);
+      await assignOrderAgent(job.id, agentUserId, target ?? undefined);
       onChanged();
       onClose();
     } catch (err) {
@@ -84,6 +228,9 @@ const AssignDrawer: React.FC<{
     }
   };
 
+  const multiple = job.parcels.length > 1;
+  const targeted = target ? job.parcels.find((p) => p.id === target) : null;
+
   return (
     <Drawer
       open
@@ -91,9 +238,9 @@ const AssignDrawer: React.FC<{
       subtitle={`${job.patient.fullName} · ${job.patient.user.phoneNumber}`}
       onClose={onClose}
       footer={
-        job.assignedAgent ? (
+        job.riders.length > 0 ? (
           <button className="btn outline sm" disabled={busy} onClick={() => void assign(null)}>
-            Take it off {job.assignedAgent.phoneNumber}
+            {target ? 'Take this parcel back' : 'Take it off everyone'}
           </button>
         ) : null
       }
@@ -105,12 +252,17 @@ const AssignDrawer: React.FC<{
           waiting.
         </div>
       ) : null}
+      {job.awaitingRider > 0 ? (
+        <div className="banner warning">
+          {job.awaitingRider} packed parcel(s) here have nobody carrying them. Riders claim from the
+          pool themselves — hand one over below only if it has been sitting.
+        </div>
+      ) : null}
 
       <Facts
         rows={[
           ['Status', <Status value={job.status} />],
           ['In this stage for', duration(job.minutesInStage)],
-          ['Pharmacy', job.pharmacy?.name ?? 'Not assigned'],
           ['Address', job.address],
           ['Total', money(job.totalAmount)],
           [
@@ -118,19 +270,43 @@ const AssignDrawer: React.FC<{
             job.payment ? (
               <>
                 <Status value={job.payment.status} /> {job.payment.method}
+                {job.paidAsBasket ? <span className="sub">Paid as part of a basket</span> : null}
               </>
             ) : null,
           ],
           ['Placed', formatDateTime(job.createdAt)],
-          ['Carried by', job.assignedAgent?.phoneNumber ?? 'Nobody'],
         ]}
       />
 
       <div className="card">
-        <h3>Hand it to someone</h3>
+        <h3>{multiple ? `Parcels (${job.parcels.length})` : 'The parcel'}</h3>
         <p className="inline-note">
-          Only partner and admin accounts can be given a delivery — there is no rider account type
-          yet, so this is the shop staff who will actually carry it.
+          Where each one is. The customer sees these places by name; the coordinates are ours.
+        </p>
+        {job.parcels.map((parcel) => (
+          <ParcelRow
+            key={parcel.id}
+            parcel={parcel}
+            multiple={multiple}
+            busy={busy}
+            onHandOver={setTarget}
+          />
+        ))}
+      </div>
+
+      <div className="card">
+        <h3>Hand it to a rider</h3>
+        <p className="inline-note">
+          {targeted
+            ? `Assigning the parcel from ${targeted.pharmacy} only.`
+            : multiple
+              ? 'Assigning every open parcel on this order to one rider.'
+              : 'Verified, active riders. Assigning puts it straight into their app.'}
+          {targeted ? (
+            <button className="btn ghost sm" onClick={() => setTarget(null)}>
+              Assign the whole order instead
+            </button>
+          ) : null}
         </p>
 
         <Resource
@@ -145,37 +321,40 @@ const AssignDrawer: React.FC<{
                   <tr>
                     <th>Rider</th>
                     <th>Shift</th>
-                    <th className="num">Open jobs</th>
+                    <th className="num">In hand</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((a) => (
-                    <tr key={a.id}>
-                      <td>
-                        {a.name}
-                        <span className="sub mono">{a.phoneNumber}</span>
-                        {a.vehicleNumber ? <span className="sub">{a.vehicleNumber}</span> : null}
-                      </td>
-                      <td>
-                        {/* On shift first in the list, so say which is which. */}
-                        <Status
-                          value={a.onShift ? 'ON SHIFT' : 'OFF SHIFT'}
-                          tone={a.onShift ? 'success' : 'neutral'}
-                        />
-                      </td>
-                      <td className="num">{a.openWork}</td>
-                      <td>
-                        <button
-                          className="btn sm"
-                          disabled={busy || a.id === job.assignedAgent?.id}
-                          onClick={() => void assign(a.id)}
-                        >
-                          {a.id === job.assignedAgent?.id ? 'Carrying' : 'Assign'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {list.map((a) => {
+                    const has = job.parcels.some((p) => p.rider?.id === a.id);
+                    return (
+                      <tr key={a.id}>
+                        <td>
+                          {a.name}
+                          <span className="sub mono">{a.phoneNumber}</span>
+                          {a.vehicleNumber ? <span className="sub">{a.vehicleNumber}</span> : null}
+                        </td>
+                        <td>
+                          {/* On shift first in the list, so say which is which. */}
+                          <Status
+                            value={a.onShift ? 'ON SHIFT' : 'OFF SHIFT'}
+                            tone={a.onShift ? 'success' : 'neutral'}
+                          />
+                        </td>
+                        <td className="num">{a.openWork}</td>
+                        <td>
+                          <button
+                            className="btn sm"
+                            disabled={busy || (has && !target)}
+                            onClick={() => void assign(a.id)}
+                          >
+                            {has && !target ? 'Carrying' : 'Assign'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -195,7 +374,7 @@ export const Deliveries: React.FC = () => {
     <>
       <PageHead
         title="Deliveries"
-        lead="Everything paid for and not yet handed over, with how long it has been sitting."
+        lead="Everything paid for and not yet handed over, with how long it has been sitting and who has it."
         actions={
           <button className="btn outline" onClick={board.reload}>
             Refresh
@@ -214,6 +393,7 @@ export const Deliveries: React.FC = () => {
                 <Stat
                   label="Nobody carrying it"
                   value={b.unassigned}
+                  hint="Packed parcels still in the pool"
                   {...(b.unassigned > 0 ? { tone: 'warning' as const } : {})}
                 />
                 <Stat
@@ -222,7 +402,14 @@ export const Deliveries: React.FC = () => {
                   hint="Unaccepted for over 30 minutes"
                   {...(b.stalled > 0 ? { tone: 'danger' as const } : {})}
                 />
-                <Stat label="Sample runs" value={b.sampleRuns.length} hint="Lab collections open" />
+                <Stat
+                  label="Riders free"
+                  value={b.idleRiders}
+                  hint="On shift with an empty bag"
+                  {...(b.unassigned > 0 && b.idleRiders === 0
+                    ? { tone: 'danger' as const }
+                    : {})}
+                />
               </div>
 
               <Tabs
@@ -230,7 +417,7 @@ export const Deliveries: React.FC = () => {
                 onChange={setTab}
                 tabs={[
                   { key: 'board', label: 'Dispatch board', count: total },
-                  { key: 'agents', label: 'Who is carrying what', count: b.agents.length },
+                  { key: 'fleet', label: 'Where the riders are', count: b.fleet.length },
                   { key: 'samples', label: 'Sample collection', count: b.sampleRuns.length },
                 ]}
               />
@@ -264,32 +451,63 @@ export const Deliveries: React.FC = () => {
                 )
               ) : null}
 
-              {tab === 'agents' ? (
+              {tab === 'fleet' ? (
                 <>
                   <p className="inline-note">
-                    Derived from who is actually carrying orders right now. There is no rider
-                    account type on the platform yet, so these are partner staff accounts — building
-                    a real rider role means a registration flow, a rider app with live location and
-                    cash reconciliation, not another table here.
+                    Riders on shift or holding a parcel. A position older than {STALE_MINUTES}{' '}
+                    minutes is flagged — reporting is foreground-only, so it usually means the app
+                    is closed rather than the rider is lost.
                   </p>
-                  {b.agents.length === 0 ? (
-                    <div className="banner info">Nobody is carrying an order right now.</div>
+                  {b.fleet.length === 0 ? (
+                    <div className="banner info">
+                      Nobody is on shift and nobody is carrying anything.
+                    </div>
                   ) : (
                     <div className="table-wrap">
                       <table>
                         <thead>
                           <tr>
-                            <th>Account</th>
-                            <th className="num">Orders in hand</th>
+                            <th>Rider</th>
+                            <th>Shift</th>
+                            <th className="num">In hand</th>
                             <th className="num">Oldest</th>
+                            <th>Last seen</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {b.agents.map((a) => (
-                            <tr key={a.id}>
-                              <td className="mono">{a.phoneNumber}</td>
-                              <td className="num">{a.orders}</td>
-                              <td className="num">{duration(a.oldestMinutes)}</td>
+                          {b.fleet.map((r) => (
+                            <tr key={r.id}>
+                              <td>
+                                {r.name}
+                                <span className="sub mono">{r.phoneNumber}</span>
+                                {r.vehicleNumber ? (
+                                  <span className="sub">{r.vehicleNumber}</span>
+                                ) : null}
+                              </td>
+                              <td>
+                                <Status
+                                  value={r.onShift ? 'ON SHIFT' : 'OFF SHIFT'}
+                                  tone={r.onShift ? 'success' : 'neutral'}
+                                />
+                              </td>
+                              <td className="num">
+                                {r.parcels}
+                                {r.carrying > 0 ? (
+                                  <span className="sub">{r.carrying} out for delivery</span>
+                                ) : null}
+                              </td>
+                              <td className="num">
+                                {r.parcels > 0 ? duration(r.oldestMinutes) : '—'}
+                              </td>
+                              <td>
+                                {r.lastSeen ? (
+                                  <Position seen={r.lastSeen} stale={isStale(r.lastSeen.at)} />
+                                ) : (
+                                  <span className="sub">
+                                    {r.parcels > 0 ? 'No position reported' : 'Nothing in hand'}
+                                  </span>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -347,11 +565,7 @@ export const Deliveries: React.FC = () => {
       </Resource>
 
       {open ? (
-        <AssignDrawer
-          job={open}
-          onClose={() => setOpen(null)}
-          onChanged={board.reload}
-        />
+        <AssignDrawer job={open} onClose={() => setOpen(null)} onChanged={board.reload} />
       ) : null}
     </>
   );

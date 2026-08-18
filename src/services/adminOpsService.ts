@@ -96,6 +96,11 @@ export const getAdminOverviewService = async () => {
     expiringStock,
     expiringLicences,
     staleFulfilments,
+    riders,
+    ridersOnShift,
+    unverifiedRiders,
+    parcelsAwaitingRider,
+    consultsUnpaid,
   ] = await Promise.all([
     prisma.patient.count(),
     prisma.doctor.count(),
@@ -132,7 +137,15 @@ export const getAdminOverviewService = async () => {
       where: { refundedAt: { gte: month } },
     }),
     prisma.paymentSplit.aggregate({ _sum: { amount: true }, _count: true, where: { status: 'PENDING' } }),
-    prisma.paymentWebhookEvent.count({ where: { processedAt: null } }),
+    /**
+     * Unprocessed *or* errored — both mean money moved at the gateway and did
+     * not move here. Counting only the unprocessed ones let a webhook that was
+     * picked up and then failed sit unnoticed, which is the more likely of the
+     * two: the panel's own webhook page has always listed them.
+     */
+    prisma.paymentWebhookEvent.count({
+      where: { OR: [{ processedAt: null }, { error: { not: null } }] },
+    }),
     prisma.$queryRaw<{ count: bigint }[]>`
       SELECT COUNT(*)::bigint AS count
       FROM "PharmacyInventory"
@@ -147,6 +160,29 @@ export const getAdminOverviewService = async () => {
     ]),
     prisma.prescriptionFulfilment.count({
       where: { status: 'PENDING_CONSENT', expiresAt: { lt: new Date() } },
+    }),
+    prisma.deliveryAgent.count({ where: { verifiedAt: { not: null } } }),
+    prisma.deliveryAgent.count({ where: { verifiedAt: { not: null }, isAvailable: true } }),
+    // A rider who registered and is waiting is a person unable to earn, and
+    // nothing else on this page was saying so.
+    prisma.deliveryAgent.count({ where: { verifiedAt: null } }),
+    // Packed, paid for, and nobody has taken it — the queue that decides whether
+    // a customer waits twenty minutes or two hours.
+    prisma.shipment.count({
+      where: { status: 'PROCESSING', assignedAgentUserId: null },
+    }),
+    /**
+     * Consultations that happened and were never paid for.
+     *
+     * Nothing on the platform blocks a booking or a video join on payment, which
+     * is a deliberate product choice — but it means the only place an unpaid
+     * consultation can surface is here, and until now it did not surface at all.
+     */
+    prisma.appointment.count({
+      where: {
+        status: 'COMPLETED',
+        OR: [{ payment: null }, { payment: { status: { not: 'PAID' } } }],
+      },
     }),
   ]);
 
@@ -164,12 +200,18 @@ export const getAdminOverviewService = async () => {
       abandonedCheckouts: unpaidOrders,
       lowStockLines: Number(lowStock[0]?.count ?? 0),
       expiringStockLines: expiringStock,
+      unverifiedRiders,
+      parcelsAwaitingRider,
+      consultsUnpaid,
     },
     people: {
       patients,
       doctors,
       pharmacies,
       labs,
+      /** The fleet is a fifth of the platform's people and was uncounted here. */
+      riders,
+      ridersOnShift,
       suspended,
       signupsThisWeek,
     },
@@ -1034,7 +1076,6 @@ const ORDER_LIST_SELECT = {
   cancelReason: true,
   patient: { select: { id: true, fullName: true, user: { select: { phoneNumber: true } } } },
   pharmacy: { select: { id: true, name: true, city: true } },
-  assignedAgent: { select: { id: true, phoneNumber: true, role: true } },
   payment: { select: { id: true, status: true, method: true, amount: true, paidAt: true } },
   fulfilment: {
     select: { id: true, payment: { select: { id: true, status: true, method: true, amount: true, paidAt: true } } },
@@ -1078,8 +1119,76 @@ const flattenOrderPayment = <T extends { payment: unknown; fulfilment: { payment
   order: T
 ) => {
   const { fulfilment, ...rest } = order;
-  return { ...rest, payment: order.payment ?? fulfilment?.payment ?? null };
+  return {
+    ...rest,
+    payment: order.payment ?? fulfilment?.payment ?? null,
+    /**
+     * True when the money belongs to a basket rather than this order alone.
+     *
+     * A prescription paid for in one go covers several orders, so the amount
+     * against this row is the whole basket's. Saying so is the difference
+     * between an operator reading a mismatch and reading a basket.
+     */
+    paidAsBasket: order.payment === null && fulfilment?.payment != null,
+  };
 };
+
+/**
+ * Who is carrying an order, read off its parcels.
+ *
+ * There is no single answer at order level — an order filled by two shops has
+ * two riders — so this returns the set, and the list shows one name or a count.
+ * The order used to carry its own rider column; nothing ever wrote it once
+ * riders started claiming parcels from the pool, so every order read as
+ * uncarried.
+ */
+const ridersOf = (shipments: {
+  status: string;
+  assignedAgent: {
+    id: string;
+    phoneNumber: string;
+    agent: { name: string; vehicleNumber: string | null } | null;
+  } | null;
+}[]) => {
+  const byId = new Map<
+    string,
+    { id: string; name: string | null; phoneNumber: string; vehicleNumber: string | null; parcels: number }
+  >();
+
+  for (const parcel of shipments) {
+    const rider = parcel.assignedAgent;
+    if (!rider) continue;
+    const row = byId.get(rider.id) ?? {
+      id: rider.id,
+      name: rider.agent?.name ?? null,
+      phoneNumber: rider.phoneNumber,
+      vehicleNumber: rider.agent?.vehicleNumber ?? null,
+      parcels: 0,
+    };
+    row.parcels += 1;
+    byId.set(rider.id, row);
+  }
+
+  return [...byId.values()];
+};
+
+/** One shape for every medicine-order read: basket payment resolved, riders named. */
+const shapeOrder = <
+  T extends {
+    payment: unknown;
+    fulfilment: { payment: unknown } | null;
+    shipments: {
+      status: string;
+      assignedAgent: {
+        id: string;
+        phoneNumber: string;
+        agent: { name: string; vehicleNumber: string | null } | null;
+      } | null;
+    }[];
+  },
+>(
+  order: T
+) => ({ ...flattenOrderPayment(order), riders: ridersOf(order.shipments) });
 
 export const listMedicineOrdersService = async (
   params: Page & {
@@ -1094,7 +1203,19 @@ export const listMedicineOrdersService = async (
     ...(params.status ? { status: params.status as Prisma.EnumOrderStatusFilter['equals'] } : {}),
     ...(params.pharmacyId ? { pharmacyId: params.pharmacyId } : {}),
     ...(params.patientId ? { patientId: params.patientId } : {}),
-    ...(params.unassigned ? { assignedAgentUserId: null } : {}),
+    /**
+     * Parcels nobody has taken, which is what a dispatcher means by unassigned.
+     * This read the order-level rider column until riders became real and began
+     * claiming parcels, after which it matched every order on the platform and
+     * told nobody anything.
+     */
+    ...(params.unassigned
+      ? {
+          shipments: {
+            some: { assignedAgentUserId: null, status: { in: ['PROCESSING', 'DISPATCHED'] } },
+          },
+        }
+      : {}),
     ...(params.search
       ? {
           OR: [
@@ -1120,7 +1241,7 @@ export const listMedicineOrdersService = async (
   ]);
 
   return {
-    orders: rows.map(flattenOrderPayment),
+    orders: rows.map(shapeOrder),
     total,
     matchedValue: money(totals._sum.totalAmount),
     page: params.page,
@@ -1171,7 +1292,7 @@ export const getMedicineOrderService = async (id: string) => {
     },
   });
 
-  return { order, stockMovements: movements };
+  return { order: shapeOrder(order), stockMovements: movements };
 };
 
 /**
@@ -1315,22 +1436,45 @@ export const listLabOrdersService = async (
 
 const DELIVERY_STAGES = ['PLACED', 'ACCEPTED', 'PROCESSING', 'DISPATCHED'] as const;
 
+/** Parcels a rider is either about to carry or carrying. */
+const RIDER_WORK = ['PROCESSING', 'DISPATCHED'] as const;
+
+/** How a rider's last known position reads on the board. */
+const lastSeenOf = (parcel: {
+  riderLatitude: number | null;
+  riderLongitude: number | null;
+  riderSeenAt: Date | null;
+  places?: { street: string | null; locality: string | null; city: string | null }[];
+}) => {
+  if (parcel.riderLatitude == null || parcel.riderLongitude == null) return null;
+  const [newest] = parcel.places ?? [];
+  return {
+    latitude: parcel.riderLatitude,
+    longitude: parcel.riderLongitude,
+    at: parcel.riderSeenAt,
+    /** The name for the coordinates, when the rider's phone could resolve one. */
+    place: newest ? newest.locality ?? newest.city ?? newest.street : null,
+    street: newest?.street ?? null,
+  };
+};
+
 /**
- * The dispatch board: every order that has been paid for and not yet handed
- * over, with how long it has been sitting.
+ * The dispatch board: every order paid for and not yet handed over, with how
+ * long it has been sitting and who is carrying each parcel.
  *
- * There is no rider *identity* on this platform yet — `assignedAgentUserId`
- * points at whichever partner staff account picked the job up. So this board
- * tracks delivery WORK, not a rider roster, and the "agents" it lists are
- * derived from who is actually carrying orders rather than from a roster table
- * that does not exist. Building a real rider role means a registration flow, a
- * rider app, live location and COD reconciliation — a product, not a screen.
+ * Read at parcel level, because that is where a rider actually is. Riders claim
+ * a sealed parcel from the open pool, which writes `Shipment.assignedAgentUserId`
+ * — the order-level column this board used to read was never written by any of
+ * it, so every order with a rider on it displayed as "nobody carrying it", the
+ * roster was permanently empty, and the unassigned alarm counted the whole
+ * board. An order filled by two shops has two riders and two positions anyway;
+ * there was never one answer to put in an order-level column.
  */
 export const getDeliveryBoardService = async (params: { pharmacyId?: string; agentUserId?: string }) => {
   const where: Prisma.MedicineOrderWhereInput = {
     status: { in: [...DELIVERY_STAGES] },
     ...(params.pharmacyId ? { pharmacyId: params.pharmacyId } : {}),
-    ...(params.agentUserId ? { assignedAgentUserId: params.agentUserId } : {}),
+    ...(params.agentUserId ? { shipments: { some: { assignedAgentUserId: params.agentUserId } } } : {}),
   };
 
   const [orders, sampleRuns] = await Promise.all([
@@ -1363,10 +1507,43 @@ export const getDeliveryBoardService = async (params: { pharmacyId?: string; age
 
   const now = Date.now();
   const withAge = orders.map((o) => {
-    const flat = flattenOrderPayment(o);
+    const flat = shapeOrder(o);
     const since = (flat.dispatchedAt ?? flat.acceptedAt ?? flat.createdAt).getTime();
+
+    /** Each parcel with its own rider and its own last position. */
+    const parcels = flat.shipments.map((s) => ({
+      id: s.id,
+      status: s.status,
+      pharmacy: s.pharmacy.name,
+      rider: s.assignedAgent
+        ? {
+            id: s.assignedAgent.id,
+            phoneNumber: s.assignedAgent.phoneNumber,
+            name: s.assignedAgent.agent?.name ?? null,
+            vehicleNumber: s.assignedAgent.agent?.vehicleNumber ?? null,
+          }
+        : null,
+      lastSeen: lastSeenOf(s),
+      /** Named places passed through, newest first, for reading a route back. */
+      trail: s.places.map((p) => ({
+        place: p.locality ?? p.city ?? p.street ?? 'Unnamed',
+        street: p.street,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        at: p.createdAt,
+      })),
+      nearlyThere: s.nearNotifiedAt !== null,
+    }));
+
+    // Packed and nobody has taken it: the parcel is sitting in the pool.
+    const awaitingRider = parcels.filter(
+      (p) => !p.rider && (p.status === 'PROCESSING' || p.status === 'DISPATCHED')
+    ).length;
+
     return {
       ...flat,
+      parcels,
+      awaitingRider,
       minutesInStage: Math.floor((now - since) / 60_000),
       /** Nobody has picked this up and it is past the point where someone should have. */
       stalled: flat.status === 'PLACED' && now - flat.createdAt.getTime() > 30 * 60_000,
@@ -1377,55 +1554,135 @@ export const getDeliveryBoardService = async (params: { pharmacyId?: string; age
     DELIVERY_STAGES.map((stage) => [stage, withAge.filter((o) => o.status === stage)])
   ) as Record<(typeof DELIVERY_STAGES)[number], typeof withAge>;
 
-  // The agent roster, derived: who is currently carrying work, and how much.
-  const byAgent = new Map<string, { id: string; phoneNumber: string; orders: number; oldestMinutes: number }>();
-  for (const o of withAge) {
-    if (!o.assignedAgent) continue;
-    const row = byAgent.get(o.assignedAgent.id) ?? {
-      id: o.assignedAgent.id,
-      phoneNumber: o.assignedAgent.phoneNumber,
-      orders: 0,
-      oldestMinutes: 0,
+  /**
+   * The roster: riders on shift or holding a parcel, and where each one is.
+   *
+   * Read from the agent table rather than derived from the work, so a rider who
+   * has clocked on and taken nothing still appears — that is precisely who a
+   * dispatcher is looking for when a parcel is sitting unclaimed.
+   */
+  const [riders, held] = await Promise.all([
+    prisma.deliveryAgent.findMany({
+      where: {
+        verifiedAt: { not: null },
+        OR: [
+          { isAvailable: true },
+          { user: { assignedShipments: { some: { status: { in: [...RIDER_WORK] } } } } },
+        ],
+      },
+      orderBy: [{ isAvailable: 'desc' }, { name: 'asc' }],
+      take: 200,
+      select: {
+        userId: true,
+        name: true,
+        vehicleNumber: true,
+        isAvailable: true,
+        user: { select: { phoneNumber: true } },
+      },
+    }),
+    prisma.shipment.findMany({
+      where: { status: { in: [...RIDER_WORK] }, assignedAgentUserId: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        orderId: true,
+        status: true,
+        assignedAgentUserId: true,
+        riderLatitude: true,
+        riderLongitude: true,
+        riderSeenAt: true,
+        dispatchedAt: true,
+        createdAt: true,
+        places: {
+          select: { street: true, locality: true, city: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    }),
+  ]);
+
+  const fleet = riders.map((r) => {
+    const mine = held.filter((s) => s.assignedAgentUserId === r.userId);
+    const freshest = mine.find((s) => s.riderSeenAt !== null) ?? null;
+    const oldest = mine.reduce((acc, s) => {
+      const started = (s.dispatchedAt ?? s.createdAt).getTime();
+      return Math.min(acc, started);
+    }, now);
+
+    return {
+      id: r.userId,
+      name: r.name,
+      phoneNumber: r.user.phoneNumber,
+      vehicleNumber: r.vehicleNumber,
+      onShift: r.isAvailable,
+      parcels: mine.length,
+      carrying: mine.filter((s) => s.status === 'DISPATCHED').length,
+      oldestMinutes: mine.length > 0 ? Math.floor((now - oldest) / 60_000) : 0,
+      lastSeen: freshest ? lastSeenOf(freshest) : null,
     };
-    row.orders += 1;
-    row.oldestMinutes = Math.max(row.oldestMinutes, o.minutesInStage);
-    byAgent.set(o.assignedAgent.id, row);
-  }
+  });
 
   return {
     lanes,
     sampleRuns,
-    agents: [...byAgent.values()].sort((a, b) => b.orders - a.orders),
-    unassigned: withAge.filter((o) => !o.assignedAgent).length,
+    fleet: fleet.sort((a, b) => b.parcels - a.parcels || a.name.localeCompare(b.name)),
+    /** Orders with at least one packed parcel nobody has taken. */
+    unassigned: withAge.filter((o) => o.awaitingRider > 0).length,
     stalled: withAge.filter((o) => o.stalled).length,
+    /** Riders clocked on with nothing in hand — capacity for the unclaimed. */
+    idleRiders: fleet.filter((r) => r.onShift && r.parcels === 0).length,
   };
 };
 
 /**
- * Hands an order to a specific rider, or takes it back.
+ * Hands a parcel to a specific rider, or takes it back.
  *
- * The field is a bare user id with no constraint in the schema, so the
- * constraint lives here. It used to admit any partner or admin account,
- * because there was no rider roster to check against; there is one now, and
- * an order handed to somebody who is not on it would show up in no app at all.
- * A patient account was always refused — a mistyped id silently routing an
- * order into a black hole is exactly the failure an ops tool should not
- * enable.
+ * Written to the parcel, because that is the only place a rider's app looks.
+ * This used to set an order-level column instead, which meant an operator could
+ * press Assign, watch it succeed, and the parcel would never appear in anyone's
+ * job list — the worst kind of ops tool, one that reports success and does
+ * nothing. Without a `shipmentId` every open parcel on the order is handed over,
+ * which is what "give this order to Ramesh" means when one rider is collecting
+ * from two shops.
+ *
+ * The user id is a bare column with no constraint in the schema, so the
+ * constraint lives here: only a verified, active, unsuspended rider on the
+ * roster. A mistyped id silently routing a parcel into a black hole is exactly
+ * the failure an ops tool should not enable.
  */
-
 export const assignDeliveryAgentService = async (params: {
   actorUserId: string;
   orderId: string;
   agentUserId: string | null;
+  shipmentId?: string;
   ipAddress?: string | null;
 }) => {
   const order = await prisma.medicineOrder.findUnique({
     where: { id: params.orderId },
-    select: { id: true, status: true, assignedAgentUserId: true },
+    select: {
+      id: true,
+      status: true,
+      shipments: { select: { id: true, status: true, assignedAgentUserId: true } },
+    },
   });
   if (!order) throw notFound('Order');
   if (order.status === 'DELIVERED' || order.status === 'CANCELLED') {
     throw new AppError('This order is closed and cannot be reassigned.', 409);
+  }
+
+  const open = order.shipments.filter(
+    (s) => s.status !== 'DELIVERED' && s.status !== 'CANCELLED'
+  );
+  const targets = params.shipmentId ? open.filter((s) => s.id === params.shipmentId) : open;
+
+  if (targets.length === 0) {
+    throw new AppError(
+      params.shipmentId
+        ? 'That parcel is already delivered or cancelled.'
+        : 'Every parcel on this order is already delivered or cancelled.',
+      409
+    );
   }
 
   if (params.agentUserId) {
@@ -1439,9 +1696,13 @@ export const assignDeliveryAgentService = async (params: {
     if (!agent.verifiedAt) throw new AppError('That agent has not been verified yet.', 422);
   }
 
-  const updated = await prisma.medicineOrder.update({
-    where: { id: params.orderId },
+  await prisma.shipment.updateMany({
+    where: { id: { in: targets.map((s) => s.id) } },
     data: { assignedAgentUserId: params.agentUserId },
+  });
+
+  const updated = await prisma.medicineOrder.findUniqueOrThrow({
+    where: { id: params.orderId },
     select: ORDER_LIST_SELECT,
   });
 
@@ -1450,11 +1711,14 @@ export const assignDeliveryAgentService = async (params: {
     action: params.agentUserId ? 'admin.order.agentAssigned' : 'admin.order.agentCleared',
     entityType: 'MedicineOrder',
     entityId: order.id,
-    metadata: { from: order.assignedAgentUserId, to: params.agentUserId },
+    metadata: {
+      to: params.agentUserId,
+      parcels: targets.map((s) => ({ id: s.id, from: s.assignedAgentUserId })),
+    },
     ipAddress: params.ipAddress ?? null,
   });
 
-  return flattenOrderPayment(updated);
+  return shapeOrder(updated);
 };
 
 /**
@@ -1493,14 +1757,42 @@ export const listAssignableAgentsService = async (search?: string) => {
       vehicleNumber: true,
       isAvailable: true,
       labPartner: { select: { id: true, name: true } },
-      user: {
-        select: {
-          phoneNumber: true,
-          _count: { select: { assignedOrders: true, assignedLabOrders: true, assignedShipments: true } },
-        },
-      },
+      user: { select: { phoneNumber: true } },
     },
   });
+
+  /**
+   * What each of them is holding right now.
+   *
+   * This used to be a plain relation count, which counted every parcel the
+   * rider had ever been given — so the dispatcher's "open jobs" column only ever
+   * went up, and the busiest rider on the roster looked like the most loaded one
+   * even with an empty bag. Only unfinished work counts as load.
+   */
+  const [parcels, pickups] = await Promise.all([
+    prisma.shipment.groupBy({
+      by: ['assignedAgentUserId'],
+      where: {
+        status: { in: [...RIDER_WORK] },
+        assignedAgentUserId: { in: agents.map((a) => a.userId) },
+      },
+      _count: { _all: true },
+    }),
+    prisma.labOrder.groupBy({
+      by: ['assignedAgentUserId'],
+      where: {
+        status: { in: ['ACCEPTED', 'SAMPLE_COLLECTED'] },
+        assignedAgentUserId: { in: agents.map((a) => a.userId) },
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const load = new Map<string, number>();
+  for (const row of [...parcels, ...pickups]) {
+    if (!row.assignedAgentUserId) continue;
+    load.set(row.assignedAgentUserId, (load.get(row.assignedAgentUserId) ?? 0) + row._count._all);
+  }
 
   return agents.map((a) => ({
     // The id an assignment actually stores is the USER id, not the agent id.
@@ -1511,10 +1803,7 @@ export const listAssignableAgentsService = async (search?: string) => {
     onShift: a.isAvailable,
     /** Set when this rider may also collect samples, and for which lab. */
     collectsFor: a.labPartner,
-    openWork:
-      a.user._count.assignedOrders +
-      a.user._count.assignedLabOrders +
-      a.user._count.assignedShipments,
+    openWork: load.get(a.userId) ?? 0,
   }));
 };
 

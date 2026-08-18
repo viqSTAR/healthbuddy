@@ -1,16 +1,6 @@
 import React, { useState } from 'react';
-import { fetchAuditLogs } from '../api/endpoints';
+import { fetchAuditActions, fetchAuditLogs } from '../api/endpoints';
 import { Badge, EmptyState, ErrorState, Loading, formatDateTime, useAsync } from '../components/ui';
-
-const ACTIONS = [
-  'application.submitted',
-  'application.approved',
-  'application.rejected',
-  'prescription.issued',
-  'document.read',
-  'user.suspended',
-  'user.restored',
-];
 
 const TONE: Record<string, 'success' | 'danger' | 'warning' | 'info' | 'neutral'> = {
   'application.approved': 'success',
@@ -31,6 +21,14 @@ const TONE: Record<string, 'success' | 'danger' | 'warning' | 'info' | 'neutral'
  */
 export const AuditLog: React.FC = () => {
   const [action, setAction] = useState('');
+  /**
+   * The filter is built from what the log actually contains.
+   *
+   * It used to be a list written by hand, which offered seven actions while the
+   * log held twenty — so the ones worth reviewing (a rider verified, a parcel
+   * reassigned, cash marked collected) could not be filtered to at all.
+   */
+  const actions = useAsync(fetchAuditActions, []);
 
   const logs = useAsync(
     () => fetchAuditLogs({ ...(action ? { action } : {}), limit: 100 }),
@@ -52,9 +50,9 @@ export const AuditLog: React.FC = () => {
       <div className="toolbar">
         <select value={action} onChange={(e) => setAction(e.target.value)}>
           <option value="">All actions</option>
-          {ACTIONS.map((a) => (
-            <option key={a} value={a}>
-              {a}
+          {(actions.data ?? []).map((a) => (
+            <option key={a.action} value={a.action}>
+              {a.action.replace(/[._]/g, ' ')} ({a.count})
             </option>
           ))}
         </select>

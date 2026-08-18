@@ -112,7 +112,24 @@ const OrderDrawer: React.FC<{ id: string; onClose: () => void; onChanged: () => 
               ['Status', <Status value={o.status} />],
               ['Pharmacy', o.pharmacy?.name ?? 'Not assigned to a shop yet'],
               ['Delivery address', o.address],
-              ['Carried by', o.assignedAgent?.phoneNumber ?? 'Nobody yet'],
+              [
+                'Carried by',
+                o.riders.length === 0 ? (
+                  'Nobody yet'
+                ) : (
+                  <>
+                    {o.riders.map((r) => (
+                      <span key={r.id}>
+                        {r.name ?? 'Unnamed'}
+                        <span className="sub mono">
+                          {r.phoneNumber}
+                          {o.shipments.length > 1 ? ` · ${r.parcels} parcel(s)` : ''}
+                        </span>
+                      </span>
+                    ))}
+                  </>
+                ),
+              ],
               ['Placed', formatDateTime(o.createdAt)],
               ['Accepted', formatDateTime(o.acceptedAt)],
               ['Dispatched', formatDateTime(o.dispatchedAt)],
@@ -348,8 +365,19 @@ export const Orders: React.FC = () => {
                       <td>
                         <PaymentCell order={o} />
                       </td>
-                      <td className="mono">
-                        {o.assignedAgent?.phoneNumber ?? <span className="sub">—</span>}
+                      <td>
+                        {/* A rider carries a parcel, so an order split between
+                            two shops can be with two people at once. */}
+                        {o.riders.length === 0 ? (
+                          <span className="sub">—</span>
+                        ) : o.riders.length === 1 ? (
+                          <>
+                            {o.riders[0]!.name ?? 'Unnamed'}
+                            <span className="sub mono">{o.riders[0]!.phoneNumber}</span>
+                          </>
+                        ) : (
+                          `${o.riders.length} riders`
+                        )}
                       </td>
                       <td>
                         <Status value={o.status} />

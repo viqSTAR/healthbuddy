@@ -8,7 +8,6 @@ import {
   getPharmacyOrderQueueHandler,
   getMyPharmacyProfileHandler,
   acceptOrderHandler,
-  assignOrderAgentHandler,
   updateOrderStatusHandler,
 } from '../controllers/pharmacyController.js';
 import { checkServiceabilityHandler } from '../controllers/locationController.js';
@@ -179,16 +178,6 @@ router.post(
   authorizeRoles('PHARMACY'),
   validate({ params: z.object({ id: uuidSchema }) }),
   acceptOrderHandler
-);
-
-router.patch(
-  '/orders/:id/agent',
-  authorizeRoles('PHARMACY'),
-  validate({
-    params: z.object({ id: uuidSchema }),
-    body: z.object({ agentUserId: uuidSchema.nullable() }),
-  }),
-  assignOrderAgentHandler
 );
 
 router.patch(
