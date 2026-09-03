@@ -36,3 +36,4 @@ export type { BadgeProps } from './Badge';
 export type { AvatarProps } from './Avatar';
 export type { ListRowProps } from './ListRow';
 export type { InputProps } from './Input';
+export * from './GatewayCheckout';

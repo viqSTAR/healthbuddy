@@ -3,7 +3,9 @@ import {
   View,
   ScrollView,
   StyleSheet,
+  Platform,
   Pressable,
+  KeyboardAvoidingView,
   RefreshControl,
   type StyleProp,
   type ViewStyle,
@@ -81,7 +83,27 @@ export interface ScreenProps {
   contentStyle?: StyleProp<ViewStyle>;
 }
 
-/** Page shell: mint background, 16px page margin, safe-area aware. */
+/**
+ * Page shell: mint background, 16px page margin, safe-area aware, and out of
+ * the keyboard's way.
+ *
+ * That last part is the whole reason this component grew a `Platform` import.
+ * Android resizes the window when the keyboard opens — `adjustResize` is the
+ * Expo default — so a ScrollView there shortens and scrolls the focused field
+ * into view on its own, and every form in this app appeared to handle the
+ * keyboard correctly. iOS does no such thing: the keyboard slides *over* the
+ * content and nothing underneath moves. The same registration form that works
+ * on a Pixel hides the field you are typing into behind the keyboard on an
+ * iPhone, with no way to scroll to it.
+ *
+ * Only the two auth screens and the chat thread had ever been given a
+ * `KeyboardAvoidingView`, because those were the ones somebody had opened on an
+ * iPhone. Rather than repeat that per screen and miss the next one, the shell
+ * handles it: `automaticallyAdjustKeyboardInsets` for the scrolling case (iOS
+ * insets the scroll view by the keyboard's height), and a real
+ * `KeyboardAvoidingView` for the fixed-layout case, which cannot scroll itself
+ * out of trouble. Both props are inert on Android, which already had this right.
+ */
 export const Screen: React.FC<ScreenProps> = ({
   children,
   scroll = true,
@@ -107,6 +129,11 @@ export const Screen: React.FC<ScreenProps> = ({
           contentContainerStyle={inner}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          // iOS only; Android's window resize already does this.
+          automaticallyAdjustKeyboardInsets
+          // Dragging the keyboard away is the iOS gesture people expect in a
+          // long form. Android has no equivalent, so it gets the closest thing.
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           refreshControl={
             onRefresh ? (
               <RefreshControl
@@ -121,7 +148,12 @@ export const Screen: React.FC<ScreenProps> = ({
           {children}
         </ScrollView>
       ) : (
-        <View style={[styles.flex, inner]}>{children}</View>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={[styles.flex, inner]}>{children}</View>
+        </KeyboardAvoidingView>
       )}
     </SafeAreaView>
   );

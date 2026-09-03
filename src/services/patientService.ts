@@ -1,6 +1,7 @@
 import type { Gender } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { notFound } from '../utils/AppError.js';
+import { windowFor, type PageRequest } from '../utils/pagination.js';
 
 const patientView = {
   id: true,
@@ -51,11 +52,25 @@ export interface PatientProfileUpdate {
 export const updatePatientProfileService = (patientId: string, data: PatientProfileUpdate) =>
   prisma.patient.update({ where: { id: patientId }, data, select: patientView });
 
-export const getPatientMedicalRecordService = async (patientId: string) => {
+/**
+ * The flat record: three histories in one response.
+ *
+ * Windowed per list rather than as a whole, because they grow at different
+ * rates — someone with sixty consultations may have four lab results — and a
+ * single offset across all three would page one of them off the end.
+ */
+export const getPatientMedicalRecordService = async (
+  patientId: string,
+  page?: PageRequest
+) => {
+  const w = windowFor(page);
+
   const [appointments, prescriptions, labOrders] = await Promise.all([
     prisma.appointment.findMany({
       where: { patientId },
       orderBy: { createdAt: 'desc' },
+      take: w.take,
+      skip: w.skip,
       include: {
         doctor: { select: { name: true, specialty: true } },
         slot: { select: { date: true, startTime: true } },
@@ -64,13 +79,17 @@ export const getPatientMedicalRecordService = async (patientId: string) => {
     prisma.prescription.findMany({
       where: { patientId },
       orderBy: { createdAt: 'desc' },
+      take: w.take,
+      skip: w.skip,
       include: { doctor: { select: { name: true, specialty: true } } },
     }),
     prisma.labOrder.findMany({
       where: { patientId, status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
+      take: w.take,
+      skip: w.skip,
     }),
   ]);
 
-  return { appointments, prescriptions, labOrders };
+  return { appointments, prescriptions, labOrders, page: w.page, limit: w.limit };
 };

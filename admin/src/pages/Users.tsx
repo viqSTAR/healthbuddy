@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { errorMessage } from '../api/client';
-import { fetchUsers, setUserSuspended, type AdminUser, type Role } from '../api/endpoints';
+import { fetchUsers, setUserSuspended, eraseUser, type AdminUser, type Role } from '../api/endpoints';
 import { useAuth } from '../api/auth';
 import { Badge, EmptyState, ErrorState, Loading, formatDate, useAsync } from '../components/ui';
 
@@ -17,12 +17,53 @@ export const Users: React.FC = () => {
   const { user: me } = useAuth();
   const [role, setRole] = useState<Role | ''>('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const list = useAsync(
     () => fetchUsers({ ...(role ? { role } : {}), limit: 100 }),
     [role]
   );
+
+  /**
+   * Closing an account on request.
+   *
+   * Confirmed by typing the word rather than by an OK button, because there is
+   * no undo: the name, number, addresses and devices are destroyed, and the
+   * only thing a mistake here can be answered with is an apology. Suspension is
+   * the reversible action and sits one button to the left.
+   */
+  const erase = async (user: AdminUser) => {
+    const typed = window.prompt(
+      [
+        `Close ${displayName(user)}'s account?`,
+        '',
+        'Their name, phone number, saved addresses and devices will be destroyed. ' +
+          'Consultation, prescription and payment records are kept — they are ' +
+          'medical and accounting records.',
+        '',
+        'This cannot be undone. Type ERASE to confirm:',
+      ].join('\n')
+    );
+    if (typed !== 'ERASE') return;
+
+    const reason = window.prompt('Why? (recorded in the audit log)') ?? undefined;
+
+    setBusyId(user.id);
+    setError(null);
+    try {
+      const result = await eraseUser(user.id, reason);
+      setNotice(
+        `Account closed. Removed: ${result.removed.addresses} address(es), ` +
+          `${result.removed.devices} device(s), ${result.removed.documents} personal document(s).`
+      );
+      list.reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const toggleSuspension = async (user: AdminUser) => {
     const suspending = !user.isSuspended;
@@ -51,12 +92,15 @@ export const Users: React.FC = () => {
           <h1>Users</h1>
           <p>
             Every account on the platform. Suspending a partner also deactivates their shop, so they
-            stop receiving orders rather than merely losing sign-in.
+            stop receiving orders rather than merely losing sign-in — and it ends their live
+            sessions immediately rather than when their token happens to expire. Closing an account
+            destroys the identity and keeps the clinical and payment records.
           </p>
         </div>
       </div>
 
       {error ? <div className="banner error">{error}</div> : null}
+      {notice ? <div className="banner">{notice}</div> : null}
 
       <div className="toolbar">
         <select value={role} onChange={(e) => setRole(e.target.value as Role | '')}>
@@ -106,7 +150,9 @@ export const Users: React.FC = () => {
                   </td>
                   <td>{formatDate(user.createdAt)}</td>
                   <td>
-                    {user.isSuspended ? (
+                    {user.anonymisedAt ? (
+                      <Badge label="CLOSED" tone="neutral" />
+                    ) : user.isSuspended ? (
                       <Badge label="SUSPENDED" tone="danger" />
                     ) : (
                       <Badge label="ACTIVE" tone="success" />
@@ -123,14 +169,33 @@ export const Users: React.FC = () => {
                         locking themselves out may have no one to undo it. */}
                     {user.id === me?.id ? (
                       <span style={{ color: 'var(--caption)', fontSize: 12 }}>You</span>
+                    ) : user.anonymisedAt ? (
+                      <span style={{ color: 'var(--caption)', fontSize: 12 }}>
+                        Closed {formatDate(user.anonymisedAt)}
+                      </span>
                     ) : (
-                      <button
-                        className={`btn sm ${user.isSuspended ? 'outline' : 'danger'}`}
-                        onClick={() => void toggleSuspension(user)}
-                        disabled={busyId === user.id}
-                      >
-                        {user.isSuspended ? 'Restore' : 'Suspend'}
-                      </button>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button
+                          className={`btn sm ${user.isSuspended ? 'outline' : 'danger'}`}
+                          onClick={() => void toggleSuspension(user)}
+                          disabled={busyId === user.id}
+                        >
+                          {user.isSuspended ? 'Restore' : 'Suspend'}
+                        </button>
+                        {/* Patients only: a provider's licence and registration
+                            sit on records other people rely on, so closing one
+                            is an offboarding process and the server refuses it
+                            here. */}
+                        {user.role === 'PATIENT' ? (
+                          <button
+                            className="btn sm outline"
+                            onClick={() => void erase(user)}
+                            disabled={busyId === user.id}
+                          >
+                            Close
+                          </button>
+                        ) : null}
+                      </div>
                     )}
                   </td>
                 </tr>

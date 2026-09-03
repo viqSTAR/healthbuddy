@@ -116,6 +116,12 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
             </Text>
             <Card padded={false}>
               <ListRow
+                icon="event"
+                title="My consultations"
+                subtitle="Upcoming and past, and cancelling one"
+                onPress={() => navigation.navigate('Appointments')}
+              />
+              <ListRow
                 icon="description"
                 title="Medical records"
                 subtitle="Visits, prescriptions and reports"
@@ -136,6 +142,20 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
                 onPress={() => navigation.navigate('Messages')}
               />
               <ListRow
+                icon="payments"
+                iconTint="info"
+                title="Payments"
+                subtitle="What you paid, and any refunds"
+                onPress={() => navigation.navigate('Payments')}
+              />
+              <ListRow
+                icon="health_and_safety"
+                iconTint="success"
+                title="Health guidance"
+                subtitle="Matched to your conditions"
+                onPress={() => navigation.navigate('HealthTips')}
+              />
+              <ListRow
                 icon="emergency"
                 iconTint="danger"
                 title="Emergency contact"
@@ -151,9 +171,27 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
               General
             </Text>
             <Card padded={false}>
-              <ListRow icon="notifications" title="Notifications" onPress={() => {}} />
-              <ListRow icon="shield" iconTint="info" title="Security & Privacy" onPress={() => {}} />
-              <ListRow icon="help" iconTint="neutral" title="Help Center" onPress={() => {}} last />
+              <ListRow
+                icon="notifications"
+                title="Notifications"
+                subtitle="Appointment reminders, orders and results"
+                onPress={() => navigation.navigate('Notifications')}
+              />
+              <ListRow
+                icon="shield"
+                iconTint="info"
+                title="Privacy & data"
+                subtitle="Consents, your data, closing your account"
+                onPress={() => navigation.navigate('Privacy')}
+              />
+              <ListRow
+                icon="help"
+                iconTint="neutral"
+                title="Help"
+                subtitle="Cancellations, prescriptions, refunds and your data"
+                onPress={() => navigation.navigate('Help')}
+                last
+              />
             </Card>
           </View>
 

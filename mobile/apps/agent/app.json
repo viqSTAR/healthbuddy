@@ -9,8 +9,48 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.healthbuddy.agent"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.healthbuddy.agent",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "35F9.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "E174.1"
+            ]
+          }
+        ]
+      },
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "NSCameraUsageDescription": "Health Buddy Agent uses the camera to photograph proof of delivery and your identity documents.",
+        "NSMicrophoneUsageDescription": "Health Buddy Agent uses the microphone only if you record a voice note on a job.",
+        "NSPhotoLibraryUsageDescription": "Health Buddy Agent asks for your photos so you can attach an identity document you have already saved.",
+        "NSLocationWhenInUseUsageDescription": "Health Buddy Agent uses your location while you are carrying a delivery so the customer and the operations team can see where the parcel is. It is read only while a job is open and the app is on screen."
+      }
     },
     "android": {
       "package": "com.healthbuddy.agent",
@@ -36,6 +76,19 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Health Buddy Agent uses your location while you are carrying a delivery so the customer and the operations team can see where the parcel is. It is read only while a job is open and the app is on screen."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Health Buddy Agent asks for your photos so you can attach an identity document you have already saved.",
+          "cameraPermission": "Health Buddy Agent uses the camera to photograph proof of delivery and your identity documents."
         }
       ]
     ]

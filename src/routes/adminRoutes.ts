@@ -4,6 +4,9 @@ import {
   getAdminStatsHandler,
   listUsersHandler,
   setUserSuspendedHandler,
+  eraseUserHandler,
+  retentionReportHandler,
+  runRetentionHandler,
   listAuditLogsHandler,
   listAuditActionsHandler,
 } from '../controllers/adminController.js';
@@ -20,6 +23,10 @@ import {
   listAgentRosterHandler,
   updateAgentHandler,
   getPharmacyInventoryHandler,
+  adminUpsertInventoryHandler,
+  adminRecordStockMovementHandler,
+  adminRemoveInventoryHandler,
+  adminSetStockCountHandler,
   listLabsHandler,
   getLabHandler,
   updateLabHandler,
@@ -56,6 +63,16 @@ const idParam = z.object({ id: uuidSchema });
 const search = z.string().trim().min(1).max(120).optional();
 const listQuery = paginationSchema.extend({ search });
 const isoDate = z.string().datetime().optional();
+
+/**
+ * A calendar date, not an instant.
+ *
+ * Batch expiry is a date on a box — `2027-03` in real life, `YYYY-MM-DD` on the
+ * wire. The partner app's route has always accepted that shape, and these
+ * admin routes call the very same service, so requiring a full timestamp here
+ * would reject a value the other path accepts for the identical field.
+ */
+const expiryDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use a YYYY-MM-DD date.');
 
 /**
  * Cast toggles arrive as query strings. `'true'` is the only truthy spelling
@@ -96,6 +113,35 @@ router.patch(
     body: z.object({ suspended: z.boolean(), reason }),
   }),
   setUserSuspendedHandler
+);
+
+/**
+ * Erasure on request. One way, and audited under the administrator who ran it.
+ *
+ * A DELETE would read better but would also be wrong about what happens: the
+ * clinical and financial records survive. This empties the identity — see
+ * services/userLifecycleService for which is which and why.
+ */
+router.post(
+  '/users/:id/erase',
+  validate({ params: idParam, body: z.object({ reason }) }),
+  eraseUserHandler
+);
+
+/* ---------- Retention ---------- */
+
+/**
+ * What the retention policy would remove, and what is past its statutory floor.
+ *
+ * The second number is the one worth looking at: records under a floor are
+ * counted here and deleted by a person, never by the job. See DATA-POLICY.md.
+ */
+router.get('/retention', retentionReportHandler);
+
+router.post(
+  '/retention/run',
+  validate({ body: z.object({ apply: z.boolean().optional() }) }),
+  runRetentionHandler
 );
 
 /** The privileged-action log — role grants, application decisions, PHI reads. */
@@ -198,6 +244,80 @@ router.get(
     query: listQuery.extend({ only: z.enum(['LOW', 'EXPIRING', 'OUT']).optional() }),
   }),
   getPharmacyInventoryHandler
+);
+
+/**
+ * Stock control over somebody else's shop.
+ *
+ * A partner runs their own shelf and these are not a substitute for that. They
+ * exist for the cases the partner cannot or will not handle in time: a recall
+ * that has to be pulled everywhere at once, a shop gone dark mid-order, a
+ * recount after a dispute. Every one of them writes an audit entry naming the
+ * administrator, because reaching into a business's inventory is not an
+ * ordinary act and should never look like one.
+ *
+ * The same services the partner app uses sit underneath, so the ledger and the
+ * reservation arithmetic cannot diverge between the two paths.
+ */
+router.put(
+  '/pharmacies/:id/inventory',
+  validate({
+    params: idParam,
+    body: z.object({
+      medicineId: uuidSchema,
+      price: z.number().min(0).max(1000000),
+      stock: z.number().int().min(0).max(1000000).optional(),
+      reorderLevel: z.number().int().min(0).max(100000).optional(),
+      isActive: z.boolean().optional(),
+      batchNumber: z.string().trim().max(60).optional(),
+      expiryDate: expiryDateSchema.optional(),
+    }),
+  }),
+  adminUpsertInventoryHandler
+);
+
+/**
+ * A hand-entered movement. `quantity` is positive and `reason` sets the
+ * direction, so a write-off cannot be mistyped into creating stock.
+ */
+router.post(
+  '/pharmacies/:id/stock-movements',
+  validate({
+    params: idParam,
+    body: z.object({
+      medicineId: uuidSchema,
+      quantity: z.number().int().positive().max(1000000),
+      reason: z.enum(['PURCHASE', 'CORRECTION', 'SALE_OFFLINE', 'RETURN', 'EXPIRED', 'DAMAGED']),
+      note: z.string().trim().max(300).optional(),
+      batchNumber: z.string().trim().max(60).optional(),
+      expiryDate: expiryDateSchema.optional(),
+    }),
+  }),
+  adminRecordStockMovementHandler
+);
+
+/**
+ * A recount. The counted total goes in; the ledger works out the difference.
+ *
+ * Separate from a movement on purpose — see adminSetStockCountService.
+ */
+router.post(
+  '/pharmacies/:id/stock-count',
+  validate({
+    params: idParam,
+    body: z.object({
+      medicineId: uuidSchema,
+      countedQuantity: z.number().int().min(0).max(1000000),
+      note: z.string().trim().max(300).optional(),
+    }),
+  }),
+  adminSetStockCountHandler
+);
+
+router.delete(
+  '/pharmacies/:id/inventory/:medicineId',
+  validate({ params: idParam.extend({ medicineId: uuidSchema }) }),
+  adminRemoveInventoryHandler
 );
 
 /* ---------- Delivery agents ---------- */

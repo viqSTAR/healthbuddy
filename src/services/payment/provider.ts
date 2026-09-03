@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { env } from '../../config/env.js';
+import { MOCK_PAYMENT_KEY } from '../../utils/secrets.js';
 import { AppError } from '../../utils/AppError.js';
 
 /**
@@ -103,8 +104,8 @@ const safeEqual = (a: string, b: string): boolean => {
  * orders paid without collecting anything.
  */
 const mockProvider = (): PaymentProvider => {
-  const secret = env.JWT_ACCESS_SECRET;
-  const sign = (payload: string) => createHmac('sha256', secret).update(payload).digest('hex');
+  const sign = (payload: string) =>
+    createHmac('sha256', MOCK_PAYMENT_KEY).update(payload).digest('hex');
 
   return {
     name: 'mock',
@@ -156,7 +157,7 @@ const mockProvider = (): PaymentProvider => {
 /** Test/dev helper: mints what the real checkout sheet would hand the client. */
 export const mockHandoff = (orderId: string): { paymentId: string; signature: string } => {
   const paymentId = `pay_mock_${randomUUID().replace(/-/g, '').slice(0, 14)}`;
-  const signature = createHmac('sha256', env.JWT_ACCESS_SECRET)
+  const signature = createHmac('sha256', MOCK_PAYMENT_KEY)
     .update(`${orderId}|${paymentId}`)
     .digest('hex');
   return { paymentId, signature };

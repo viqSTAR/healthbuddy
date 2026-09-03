@@ -1,6 +1,15 @@
 import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
-import { Icon, Text, colors, radius, rupees, spacing, elevation } from '@healthbuddy/shared';
+import {
+  Icon,
+  Text,
+  colors,
+  radius,
+  rupees,
+  spacing,
+  elevation,
+  useBottomActionInset,
+} from '@healthbuddy/shared';
 import { useCart } from '../services/cart';
 
 /**
@@ -13,6 +22,9 @@ import { useCart } from '../services/cart';
  */
 export const CartBar: React.FC<{ onPress: () => void }> = ({ onPress }) => {
   const cart = useCart();
+  // The store is a stack screen, so there is no tab bar underneath to absorb
+  // the home indicator — this bar is the bottom-most thing on the screen.
+  const bottom = useBottomActionInset(spacing.insetCard);
   if (cart.count === 0) return null;
 
   const parcels = new Set(
@@ -20,7 +32,7 @@ export const CartBar: React.FC<{ onPress: () => void }> = ({ onPress }) => {
   ).size;
 
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
+    <View style={[styles.wrap, { bottom }]} pointerEvents="box-none">
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [styles.bar, pressed && styles.pressed]}
@@ -61,7 +73,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: spacing.insetPage,
     right: spacing.insetPage,
-    bottom: spacing.insetCard,
   },
   bar: {
     flexDirection: 'row',

@@ -12,9 +12,15 @@
     "test": "node --import tsx --import ./tests/testEnv.mjs --test --test-concurrency=1 --test-reporter=spec tests/**/*.test.ts",
     "test:watch": "npm test -- --watch",
     "prisma:generate": "prisma generate",
-    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:status": "prisma migrate status",
     "seed": "tsx prisma/seed.ts",
+    "preflight": "tsx scripts/preflight.ts",
+    "restore:drill": "tsx scripts/restoreDrill.ts",
     "storage:check": "tsx scripts/checkStorage.ts",
+    "retention": "tsx scripts/enforceRetention.ts",
+    "loadtest": "tsx scripts/loadTest.ts",
     "test:security": "node --import tsx --import ./tests/testEnv.mjs --test --test-concurrency=1 --test-reporter=spec tests/security.test.ts"
   },
   "keywords": [

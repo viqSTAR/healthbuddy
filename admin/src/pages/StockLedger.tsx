@@ -1,14 +1,22 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Badge, EmptyState, ErrorState, Loading, formatDateTime, useAsync } from '../components/ui';
 import { fetchStockMovements, type StockMovementReason } from '../api/endpoints';
 
 /**
- * Every stock movement across every pharmacy.
+ * Stock movement across the whole platform, and the way into one shop.
  *
  * The reason this is an admin page at all: expired and damaged stock is where
  * shrinkage hides. A partner who writes off 300 units a month is either running
  * a badly managed cold chain or is not really writing them off — and neither is
  * visible if stock is just a number a shop edits.
+ *
+ * What this view is *not* good for is acting on any of it. Every movement from
+ * every shop in one list answers "how much shrinkage is there overall" and no
+ * other question, and the question an operator actually arrives with is about a
+ * particular shop. So the pharmacy column is a link: the platform-wide view
+ * spots the pattern, the shop's own page — where its shelf can be edited — is
+ * where something gets done about it.
  */
 
 const REASONS: { value: StockMovementReason | ''; label: string }[] = [
@@ -66,7 +74,8 @@ export const StockLedger: React.FC = () => {
         <div>
           <h1>Stock ledger</h1>
           <p className="sub">
-            Every change to every pharmacy's stock, with the reason it was given.
+            Every change to every pharmacy's stock, with the reason given. Open a shop to
+            see its own shelf and adjust it.
           </p>
         </div>
       </header>
@@ -117,7 +126,9 @@ export const StockLedger: React.FC = () => {
               {rows.map((m) => (
                 <tr key={m.id}>
                   <td className="sub">{formatDateTime(m.createdAt)}</td>
-                  <td>{m.pharmacyName}</td>
+                  <td>
+                    <Link to={`/pharmacies/${m.pharmacyId}`}>{m.pharmacyName}</Link>
+                  </td>
                   <td>
                     <strong>{m.medicineName}</strong>
                     {m.batchNumber ? (

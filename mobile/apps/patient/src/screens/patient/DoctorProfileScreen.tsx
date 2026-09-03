@@ -19,6 +19,7 @@ import {
   rupees,
   spacing,
   useAsync,
+  useBottomActionInset,
 } from '@healthbuddy/shared';
 
 /** Mirrors `doctor_profile_1`: hero card, stat row, detail groups, sticky CTA. */
@@ -28,6 +29,7 @@ export const DoctorProfileScreen: React.FC<{ navigation: any; route: any }> = ({
 }) => {
   const { doctorId } = route.params;
   const { data: doctor, loading, error, reload } = useAsync(() => fetchDoctor(doctorId), [doctorId]);
+  const footerInset = useBottomActionInset(spacing.xl);
 
   if (loading) {
     return (
@@ -136,7 +138,7 @@ export const DoctorProfileScreen: React.FC<{ navigation: any; route: any }> = ({
         </View>
       </Screen>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: footerInset }]}>
         <Button
           label={`Book Consultation · ${rupees(doctor.consultationFee)}`}
           fullWidth
@@ -162,7 +164,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     padding: spacing.insetPage,
-    paddingBottom: spacing.xl,
+    // `paddingBottom` is applied at the call site: 24pt clears an Android
+    // gesture bar but not a 34pt home indicator, and the button underneath is
+    // the point of the screen.
     backgroundColor: colors.surfaceContainerLowest,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,

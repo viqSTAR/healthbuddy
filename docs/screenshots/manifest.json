@@ -1,0 +1,333 @@
+[
+ {
+  "app": "patient",
+  "name": "home",
+  "blurb": "Home: delivery pincode, quick actions, next appointment, doctor categories.",
+  "file": "patient-01-home.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "doctor-directory",
+  "blurb": "Doctor directory. Video lists every doctor; in-person filters to the patient’s city.",
+  "file": "patient-02-doctor-directory.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "doctor-profile",
+  "blurb": "One doctor: credentials, fee, availability, patient reviews.",
+  "file": "patient-03-doctor-profile.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "book-consultation",
+  "blurb": "Slot picker. Video or in-person, with the fee shown before commitment.",
+  "file": "patient-04-book-consultation.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "medicine-store",
+  "blurb": "Medicine store, scoped to shops that deliver to the saved pincode.",
+  "file": "patient-05-medicine-store.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "medicine-detail",
+  "blurb": "A medicine: price, schedule, whether a prescription is required.",
+  "file": "patient-06-medicine-detail.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "cart",
+  "blurb": "Basket. Splits into one parcel per pharmacy when shops differ.",
+  "file": "patient-07-cart.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "lab-tests",
+  "blurb": "Lab test catalogue with home-collection availability.",
+  "file": "patient-08-lab-tests.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "lab-test-detail",
+  "blurb": "A test: preparation instructions, turnaround, price.",
+  "file": null,
+  "ok": false,
+  "why": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed."
+ },
+ {
+  "app": "patient",
+  "name": "emergency",
+  "blurb": "Emergency SOS: shares live location with the response desk.",
+  "file": "patient-09-emergency.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "doctors-tab",
+  "blurb": "Doctors tab: search and filter the full directory.",
+  "file": "patient-10-doctors-tab.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "records",
+  "blurb": "Medical records: prescriptions, lab reports, visit history.",
+  "file": "patient-11-records.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "orders",
+  "blurb": "Orders: medicine parcels and lab bookings, with live status.",
+  "file": "patient-12-orders.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "profile",
+  "blurb": "Profile: identity, addresses, payments, privacy, help.",
+  "file": "patient-13-profile.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "edit-profile",
+  "blurb": "Edit profile: name, date of birth, blood group, emergency contact.",
+  "file": "patient-14-edit-profile.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "address-book",
+  "blurb": "Saved addresses. The chosen pincode decides which pharmacies can serve you.",
+  "file": "patient-15-address-book.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "payments",
+  "blurb": "Payment history with refund status.",
+  "file": "patient-16-payments.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "appointments",
+  "blurb": "Every consultation booked, past and upcoming.",
+  "file": "patient-17-appointments.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "notifications",
+  "blurb": "In-app notification feed — the durable record behind push.",
+  "file": "patient-18-notifications.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "privacy",
+  "blurb": "DPDP controls: consent per purpose, data export, account closure.",
+  "file": "patient-19-privacy.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "health-tips",
+  "blurb": "Health tips delivered on a schedule.",
+  "file": "patient-20-health-tips.png",
+  "ok": true
+ },
+ {
+  "app": "patient",
+  "name": "help",
+  "blurb": "Support and help.",
+  "file": "patient-21-help.png",
+  "ok": true
+ },
+ {
+  "app": "doctor",
+  "who": "Dr. Aisha Mehta, Cardiologist",
+  "name": "login",
+  "blurb": "Phone sign-in. Same OTP flow across every app.",
+  "file": "doctor-01-login.png",
+  "ok": true
+ },
+ {
+  "app": "doctor",
+  "who": "Dr. Aisha Mehta, Cardiologist",
+  "name": "today",
+  "blurb": "Today’s consultations, earnings and the next patient waiting.",
+  "file": "doctor-02-today.png",
+  "ok": true
+ },
+ {
+  "app": "doctor",
+  "who": "Dr. Aisha Mehta, Cardiologist",
+  "name": "schedule",
+  "blurb": "Slot management: which hours are open for booking.",
+  "file": "doctor-03-schedule.png",
+  "ok": true
+ },
+ {
+  "app": "doctor",
+  "who": "Dr. Aisha Mehta, Cardiologist",
+  "name": "messages",
+  "blurb": "Follow-up threads with patients already seen.",
+  "file": "doctor-04-messages.png",
+  "ok": true
+ },
+ {
+  "app": "doctor",
+  "who": "Dr. Aisha Mehta, Cardiologist",
+  "name": "profile",
+  "blurb": "Credentials, council registration and payout details.",
+  "file": "doctor-05-profile.png",
+  "ok": true
+ },
+ {
+  "app": "doctor",
+  "who": "Dr. Aisha Mehta, Cardiologist",
+  "name": "earnings",
+  "blurb": "Per-consultation earnings and settlement status.",
+  "file": "doctor-06-earnings.png",
+  "ok": true
+ },
+ {
+  "app": "doctor",
+  "who": "Dr. Aisha Mehta, Cardiologist",
+  "name": "notifications",
+  "blurb": "Booking alerts and cancellations.",
+  "file": "doctor-07-notifications.png",
+  "ok": true
+ },
+ {
+  "app": "pharmacy",
+  "who": "Health Buddy Central Pharmacy",
+  "name": "login",
+  "blurb": "Phone sign-in. Same OTP flow across every app.",
+  "file": "pharmacy-01-login.png",
+  "ok": true
+ },
+ {
+  "app": "pharmacy",
+  "who": "Health Buddy Central Pharmacy",
+  "name": "orders",
+  "blurb": "Incoming medicine orders to accept, pack and hand over.",
+  "file": "pharmacy-02-orders.png",
+  "ok": true
+ },
+ {
+  "app": "pharmacy",
+  "who": "Health Buddy Central Pharmacy",
+  "name": "stock",
+  "blurb": "Shelf inventory: price, quantity, batch and expiry.",
+  "file": "pharmacy-03-stock.png",
+  "ok": true
+ },
+ {
+  "app": "pharmacy",
+  "who": "Health Buddy Central Pharmacy",
+  "name": "profile",
+  "blurb": "Shop details, drug licence and payout account.",
+  "file": "pharmacy-04-profile.png",
+  "ok": true
+ },
+ {
+  "app": "pharmacy",
+  "who": "Health Buddy Central Pharmacy",
+  "name": "earnings",
+  "blurb": "What the shop earned, per order leg.",
+  "file": "pharmacy-05-earnings.png",
+  "ok": true
+ },
+ {
+  "app": "pharmacy",
+  "who": "Health Buddy Central Pharmacy",
+  "name": "notifications",
+  "blurb": "New order and cancellation alerts.",
+  "file": "pharmacy-06-notifications.png",
+  "ok": true
+ },
+ {
+  "app": "lab",
+  "who": "Health Buddy Diagnostics",
+  "name": "login",
+  "blurb": "Phone sign-in. Same OTP flow across every app.",
+  "file": "lab-01-login.png",
+  "ok": true
+ },
+ {
+  "app": "lab",
+  "who": "Health Buddy Diagnostics",
+  "name": "bookings",
+  "blurb": "Test bookings, including home sample collection.",
+  "file": "lab-02-bookings.png",
+  "ok": true
+ },
+ {
+  "app": "lab",
+  "who": "Health Buddy Diagnostics",
+  "name": "tests",
+  "blurb": "The catalogue this lab offers, and its prices.",
+  "file": "lab-03-tests.png",
+  "ok": true
+ },
+ {
+  "app": "lab",
+  "who": "Health Buddy Diagnostics",
+  "name": "profile",
+  "blurb": "Lab details and payout account.",
+  "file": "lab-04-profile.png",
+  "ok": true
+ },
+ {
+  "app": "agent",
+  "who": "Imran Qureshi, delivery agent",
+  "name": "login",
+  "blurb": "Phone sign-in. Same OTP flow across every app.",
+  "file": "agent-01-login.png",
+  "ok": true
+ },
+ {
+  "app": "agent",
+  "who": "Imran Qureshi, delivery agent",
+  "name": "available",
+  "blurb": "Unassigned jobs the agent can claim.",
+  "file": "agent-02-available.png",
+  "ok": true
+ },
+ {
+  "app": "agent",
+  "who": "Imran Qureshi, delivery agent",
+  "name": "my jobs",
+  "blurb": "Jobs already accepted, with pickup and drop legs.",
+  "file": "agent-03-my jobs.png",
+  "ok": true
+ },
+ {
+  "app": "agent",
+  "who": "Imran Qureshi, delivery agent",
+  "name": "profile",
+  "blurb": "Agent details and availability toggle.",
+  "file": "agent-04-profile.png",
+  "ok": true
+ },
+ {
+  "app": "agent",
+  "who": "Imran Qureshi, delivery agent",
+  "name": "notifications",
+  "blurb": "New job offers and reassignments.",
+  "file": "agent-05-notifications.png",
+  "ok": true
+ }
+]

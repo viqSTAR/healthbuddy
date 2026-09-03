@@ -9,6 +9,9 @@ node_modules/
 # Build output
 dist/
 build/
+# TypeScript's incremental-build cache. Tracked by mistake, which put a binary
+# diff in every commit that happened to follow a build.
+*.tsbuildinfo
 
 # Uploaded files (local storage driver). Licence documents and lab reports are
 # health data and business records — they belong in object storage, not in git.

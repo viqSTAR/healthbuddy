@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { connectDatabase, disconnectDatabase } from './config/db.js';
 import { assertDistributedStore, cacheStore, getRedisClient } from './config/redis.js';
+import { errorReporter } from './utils/errorReporter.js';
 
 const start = async () => {
   // Fail fast on a dead database instead of surfacing it as 500s per request.
@@ -29,6 +30,27 @@ const start = async () => {
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+
+  /**
+   * Faults that escaped every handler.
+   *
+   * Without these Node prints to stderr and, for an unhandled rejection, exits
+   * with a code and no context — which in a container is a restart with nothing
+   * to explain it. Logging first means the reason survives; exiting after is
+   * deliberate, because a process that reached here has state nobody reasoned
+   * about and serving the next request from it is a guess.
+   */
+  process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled promise rejection — exiting.', reason);
+    errorReporter.capture(reason, { route: 'process/unhandledRejection' });
+    void shutdown('unhandledRejection');
+  });
+
+  process.on('uncaughtException', (err) => {
+    logger.error(`Uncaught exception — exiting: ${err.message}`, err.stack ?? '');
+    errorReporter.capture(err, { route: 'process/uncaughtException' });
+    void shutdown('uncaughtException');
+  });
 };
 
 start().catch((err) => {

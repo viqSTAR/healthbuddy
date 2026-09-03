@@ -6,6 +6,11 @@ import {
   getMedicalRecordHandler,
   listVisitsHandler,
   getVisitHandler,
+  exportMyDataHandler,
+  closeMyAccountHandler,
+  listConsentsHandler,
+  grantConsentHandler,
+  withdrawConsentHandler,
 } from '../controllers/patientController.js';
 import {
   listAddressesHandler,
@@ -131,6 +136,64 @@ router.post(
   '/me/addresses/:id/default',
   validate({ params: z.object({ id: uuidSchema }) }),
   setDefaultAddressHandler
+);
+
+/* ---------- Consent ---------- */
+
+const consentPurposes = [
+  'TERMS_OF_SERVICE',
+  'PRIVACY_POLICY',
+  'TELECONSULTATION',
+  'MARKETING_MESSAGES',
+] as const;
+
+/** Every purpose and where the caller stands on it, including stale agreements. */
+router.get('/me/consents', listConsentsHandler);
+
+/**
+ * Recording agreement.
+ *
+ * `policyVersion` is what the client says it displayed. Sending it is optional
+ * but checked when present, so an app left un-updated on a phone cannot go on
+ * collecting agreement to wording that has since been replaced.
+ */
+router.post(
+  '/me/consents',
+  validate({
+    body: z.object({
+      purpose: z.enum(consentPurposes),
+      policyVersion: z.string().trim().max(40).optional(),
+    }),
+  }),
+  grantConsentHandler
+);
+
+/** Withdrawal. Allowed for every purpose — a consent that cannot be taken back
+ *  is not consent — with the consequence stated in the response. */
+router.delete(
+  '/me/consents/:purpose',
+  validate({ params: z.object({ purpose: z.enum(consentPurposes) }) }),
+  withdrawConsentHandler
+);
+
+/* ---------- Account lifecycle ---------- */
+
+/** Everything held about the caller, so erasure is an informed decision. */
+router.get('/me/export', exportMyDataHandler);
+
+/**
+ * Closing the account. Irreversible, and confirmed by typing the phone number
+ * rather than by a flag a client could set by accident.
+ */
+router.delete(
+  '/me',
+  validate({
+    body: z.object({
+      confirmPhoneNumber: phoneSchema,
+      reason: z.string().trim().max(500).optional(),
+    }),
+  }),
+  closeMyAccountHandler
 );
 
 export default router;

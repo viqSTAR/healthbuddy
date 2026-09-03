@@ -22,6 +22,7 @@ import {
   TopBar,
   typography,
   useAsync,
+  useBottomActionInset,
 } from '@healthbuddy/shared';
 
 const nextDays = (count: number) =>
@@ -42,6 +43,7 @@ export const BookConsultationScreen: React.FC<{ navigation: any; route: any }> =
 }) => {
   const { doctorId } = route.params;
   const days = useMemo(() => nextDays(7), []);
+  const footerInset = useBottomActionInset(spacing.xl);
 
   const [date, setDate] = useState(days[0]!.iso);
   const [slotId, setSlotId] = useState<string | null>(null);
@@ -209,7 +211,7 @@ export const BookConsultationScreen: React.FC<{ navigation: any; route: any }> =
         </View>
       </Screen>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: footerInset }]}>
         <Button
           label={slotId ? 'Confirm Booking' : 'Select a slot'}
           fullWidth
@@ -284,7 +286,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     padding: spacing.insetPage,
-    paddingBottom: spacing.xl,
+    // `paddingBottom` is applied at the call site: 24pt clears an Android
+    // gesture bar but not a 34pt home indicator, and the button underneath is
+    // the point of the screen.
     backgroundColor: colors.surfaceContainerLowest,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,

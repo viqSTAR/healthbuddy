@@ -31,6 +31,11 @@ import { PrescriptionScreen } from '../screens/patient/PrescriptionScreen';
 import { PrescriptionOrderScreen } from '../screens/patient/PrescriptionOrderScreen';
 import { ProfileScreen } from '../screens/patient/ProfileScreen';
 import { AddressBookScreen } from '../screens/patient/AddressBookScreen';
+import { PrivacyScreen } from '../screens/patient/PrivacyScreen';
+import { AppointmentsScreen } from '../screens/patient/AppointmentsScreen';
+import { PaymentsScreen } from '../screens/patient/PaymentsScreen';
+import { HealthTipsScreen } from '../screens/patient/HealthTipsScreen';
+import { HelpScreen } from '../screens/patient/HelpScreen';
 import { VisitDetailScreen } from '../screens/patient/VisitDetailScreen';
 import { EditProfileScreen } from '../screens/patient/EditProfileScreen';
 
@@ -136,6 +141,11 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="LabTestDetail" component={LabTestDetailScreen} />
             <Stack.Screen name="LabResult" component={LabResultScreen} />
             <Stack.Screen name="Emergency" component={EmergencySosScreen} />
+            <Stack.Screen name="Privacy" component={PrivacyScreen} />
+            <Stack.Screen name="Appointments" component={AppointmentsScreen} />
+            <Stack.Screen name="Payments" component={PaymentsScreen} />
+            <Stack.Screen name="HealthTips" component={HealthTipsScreen} />
+            <Stack.Screen name="Help" component={HelpScreen} />
             <Stack.Screen name="DoctorProfile" component={DoctorProfileScreen} />
             <Stack.Screen name="BookConsultation" component={BookConsultationScreen} />
             <Stack.Screen name="AppointmentConfirmed" component={AppointmentConfirmedScreen} />

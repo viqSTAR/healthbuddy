@@ -2,6 +2,7 @@ import { prisma } from '../config/db.js';
 import { env } from '../config/env.js';
 import { AppError, notFound } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
+import { windowFor, type PageRequest } from '../utils/pagination.js';
 
 /**
  * Follow-up messaging between a patient and a doctor who has actually seen them.
@@ -186,17 +187,33 @@ const requireParty = async (threadId: string, party: { patientId?: string; docto
   return thread;
 };
 
+/** A follow-up window is seven days; a busy thread inside it is still finite. */
+const MESSAGE_PAGE_SIZE = 100;
+
 export const getThreadService = async (
   threadId: string,
-  party: { patientId?: string; doctorId?: string }
+  party: { patientId?: string; doctorId?: string },
+  page?: PageRequest
 ) => {
   const thread = await requireParty(threadId, party);
 
-  const messages = await prisma.chatMessage.findMany({
+  /**
+   * The newest N, then reversed for display.
+   *
+   * Read descending and flipped rather than ascending with a `take`, because an
+   * ascending window returns the *oldest* messages — open a long thread and you
+   * are looking at last month. Chat is one of the few histories where the tail
+   * is the part anyone wants.
+   */
+  const w = windowFor(page, MESSAGE_PAGE_SIZE);
+  const newest = await prisma.chatMessage.findMany({
     where: { threadId },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
+    take: w.take,
+    skip: w.skip,
     select: { id: true, senderUserId: true, body: true, readAt: true, createdAt: true },
   });
+  const messages = newest.reverse();
 
   // `userId` identifies the parties to the server; it is not the client's business.
   const { patient, doctor, ...rest } = thread;

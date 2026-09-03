@@ -18,6 +18,7 @@ export { rupees } from './format';
 
 /* Hooks */
 export { useAsync } from './hooks/useAsync';
+export { useBottomActionInset } from './hooks/useBottomActionInset';
 export { useProviderApplication } from './hooks/useProviderApplication';
 export type { ProviderGate } from './hooks/useProviderApplication';
 
@@ -40,6 +41,7 @@ export {
   registerForPushNotifications,
   unregisterPushToken,
   onNotificationTapped,
+  syncNotificationBadge,
   isExpoGo,
 } from './services/notifications';
 

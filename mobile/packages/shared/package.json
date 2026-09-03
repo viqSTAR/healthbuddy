@@ -6,11 +6,26 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "peerDependencies": {
     "expo": "*",
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "expo-constants": "*",
+    "expo-document-picker": "*",
+    "expo-image-picker": "*",
+    "expo-notifications": "*",
+    "expo-secure-store": "*",
+    "react-native-safe-area-context": "*",
+    "react-native-webview": "*",
+    "axios": "*",
+    "@expo/vector-icons": "*",
+    "@expo-google-fonts/inter": "*"
+  },
+  "devDependencies": {
+    "axios-mock-adapter": "^2.1.0",
+    "vitest": "^3.2.7"
   }
 }

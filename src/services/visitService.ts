@@ -2,6 +2,7 @@ import { prisma } from '../config/db.js';
 import { env } from '../config/env.js';
 import { notFound } from '../utils/AppError.js';
 import { minutesUntilSlot } from '../utils/clock.js';
+import { windowFor, type PageRequest } from '../utils/pagination.js';
 
 /**
  * A patient's history, organised the way they remember it.
@@ -90,10 +91,13 @@ const visitCore = {
  * diagnoses is a wall of clinical text nobody scans. The counts say what is
  * there; opening the visit says what it was.
  */
-export const listVisitsService = async (patientId: string) => {
+export const listVisitsService = async (patientId: string, page?: PageRequest) => {
+  const w = windowFor(page);
   const appointments = await prisma.appointment.findMany({
     where: { patientId },
     orderBy: [{ slot: { date: 'desc' } }, { slot: { startTime: 'desc' } }],
+    take: w.take,
+    skip: w.skip,
     select: {
       ...visitCore,
       meetingRoomId: true,

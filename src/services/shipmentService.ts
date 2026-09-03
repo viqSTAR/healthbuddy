@@ -100,7 +100,22 @@ export const acceptShipmentService = async (shipmentId: string, pharmacyId: stri
     throw conflict(`This shipment is already ${existing.status.toLowerCase()}.`);
   }
 
-  return prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+  const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+
+  /**
+   * Accepting moves the order too.
+   *
+   * Every other shipment transition syncs the order row; this one did not, so a
+   * claimed parcel left its order still reading PLACED. Reads that derive were
+   * unaffected — they always compute from the shipments — but everything that
+   * filters on the column in SQL was not, and that is most of the operations
+   * view: the admin board's "awaiting a shop" count kept including orders a
+   * pharmacy had already taken, so an operator chasing unclaimed work was
+   * chasing some that did not exist.
+   */
+  await syncOrderStatusService(shipment.orderId);
+
+  return shipment;
 };
 
 export const updateShipmentStatusService = async (

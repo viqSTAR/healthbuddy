@@ -4,6 +4,7 @@ import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { toPublicDocument } from './documentService.js';
 import { refundForTargetService } from './paymentService.js';
+import { windowFor, type PageRequest } from '../utils/pagination.js';
 
 export const getLabPackagesService = async (category?: string, page = 1, limit = 20) => {
   const where: Prisma.LabPackageWhereInput = category
@@ -115,8 +116,15 @@ export const bookLabTestService = async (patientId: string, input: BookLabTestIn
   });
 };
 
-export const getPatientLabOrdersService = (patientId: string) =>
-  prisma.labOrder.findMany({ where: { patientId }, orderBy: { createdAt: 'desc' } });
+export const getPatientLabOrdersService = (patientId: string, page?: PageRequest) => {
+  const w = windowFor(page);
+  return prisma.labOrder.findMany({
+    where: { patientId },
+    orderBy: { createdAt: 'desc' },
+    take: w.take,
+    skip: w.skip,
+  });
+};
 
 export const getPatientLabOrderByIdService = async (orderId: string, patientId: string) => {
   const order = await prisma.labOrder.findUnique({ where: { id: orderId } });

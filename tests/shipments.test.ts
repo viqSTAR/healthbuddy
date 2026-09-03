@@ -268,6 +268,56 @@ describe('an order splits into one shipment per pharmacy', () => {
   });
 });
 
+describe('the order row tracks its parcels', () => {
+  /**
+   * Every other shipment transition wrote the order's own status back from its
+   * parcels; accepting did not. Reads that derive were fine, but everything
+   * filtering on the column in SQL — which is most of the operations view —
+   * kept counting a claimed order as still awaiting a shop.
+   */
+  test('accepting a parcel moves the order off PLACED', async () => {
+    const patient = await login();
+    const address = await saveAddress(patient.accessToken, SPLIT_PINCODE);
+    const { first } = await medicinesFromDifferentShops(patient.accessToken);
+
+    const placed = await request(app)
+      .post('/api/v1/pharmacy/orders')
+      .set(auth(patient.accessToken))
+      .send({ items: [{ medicineId: first.id, quantity: 1 }], addressId: address.id });
+    assert.equal(placed.status, 201, placed.text);
+
+    const orderId = placed.body.order.id as string;
+    const shipment = (placed.body.order.shipments as { id: string; pharmacyId: string }[])[0]!;
+
+    const before = await prisma.medicineOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { status: true },
+    });
+    assert.equal(before.status, 'PLACED', 'sanity: nobody has taken it yet');
+
+    const owner = await prisma.pharmacy.findUniqueOrThrow({
+      where: { id: shipment.pharmacyId },
+      select: { user: { select: { phoneNumber: true } } },
+    });
+    const partner = await loginOnce(owner.user.phoneNumber);
+
+    const accepted = await request(app)
+      .post(`/api/v1/pharmacy/shipments/${shipment.id}/accept`)
+      .set(auth(partner.accessToken));
+    assert.equal(accepted.status, 200, accepted.text);
+
+    const after = await prisma.medicineOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { status: true },
+    });
+    assert.equal(
+      after.status,
+      'ACCEPTED',
+      'the column a dashboard filters on must agree with the parcels'
+    );
+  });
+});
+
 describe('settlement follows the goods', () => {
   test('each pharmacy is credited for its own lines, and the legs sum exactly', async () => {
     const patient = await login();

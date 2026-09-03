@@ -1,23 +1,51 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { verifyAccessToken, type JwtPayload, type Role } from '../utils/jwt.js';
-import { unauthorized, forbidden } from '../utils/AppError.js';
+import { verifyAccessToken, type SignedClaims, type JwtPayload, type Role } from '../utils/jwt.js';
+import { assertSessionValid } from '../services/sessionService.js';
+import { AppError, unauthorized, forbidden } from '../utils/AppError.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: JwtPayload;
 }
 
-export const authenticateJwt = (req: AuthenticatedRequest, _res: Response, next: NextFunction) => {
+/**
+ * Two checks, not one.
+ *
+ * The signature proves the token was issued by this service. It says nothing
+ * about whether the account behind it is still allowed to hold a session, and
+ * that gap is what let a suspended account keep working until its token
+ * expired. `assertSessionValid` closes it against the live account state — see
+ * services/sessionService.
+ */
+export const authenticateJwt = async (
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction
+) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     return next(unauthorized('Authentication required. No Bearer token provided.'));
   }
 
+  let claims: SignedClaims;
   try {
-    req.user = verifyAccessToken(authHeader.slice('Bearer '.length).trim());
-    next();
+    claims = verifyAccessToken(authHeader.slice('Bearer '.length).trim());
   } catch {
-    next(unauthorized('Invalid or expired access token.'));
+    return next(unauthorized('Invalid or expired access token.'));
   }
+
+  try {
+    await assertSessionValid(claims);
+  } catch (err) {
+    // A revoked session is a 401 with a reason. Anything else here is a failed
+    // lookup, which must not be reported as "your token is bad" — that sends a
+    // legitimate user into a sign-out loop over an outage.
+    return next(
+      err instanceof AppError ? err : new AppError('Could not verify the session.', 503)
+    );
+  }
+
+  req.user = claims;
+  next();
 };
 
 /**

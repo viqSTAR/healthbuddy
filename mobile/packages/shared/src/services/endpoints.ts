@@ -808,10 +808,17 @@ export const assignShipmentAgent = async (id: string, agentUserId: string | null
 export const acceptMedicineOrder = async (id: string) =>
   (await api.post<{ order: MedicineOrder }>(`/pharmacy/orders/${id}/accept`)).data.order;
 
-export const assignOrderAgent = async (id: string, agentUserId: string | null) =>
-  (await api.patch<{ order: MedicineOrder }>(`/pharmacy/orders/${id}/agent`, { agentUserId })).data
-    .order;
-
+/**
+ * Assigning a rider is per *parcel*, not per order — see `assignShipmentAgent`
+ * above.
+ *
+ * There used to be an `assignOrderAgent` here calling
+ * `PATCH /pharmacy/orders/:id/agent`. That route was removed when riders began
+ * claiming parcels from a pool: an order filled by two shops has two riders, so
+ * there was never one answer to store on the order. The client function outlived
+ * the endpoint and would have 404'd — nothing called it, which is the only
+ * reason nobody noticed.
+ */
 export const updateMedicineOrderStatus = async (
   id: string,
   status: OrderStatus,
@@ -1933,3 +1940,66 @@ export interface AdminUser {
 
 export const fetchUsers = async (params?: { role?: string; page?: number; limit?: number }) =>
   (await api.get<{ users: AdminUser[]; total: number }>('/admin/users', { params })).data;
+
+/* ---------- Privacy: consent, export, closing the account ---------- */
+
+export type ConsentPurpose =
+  | 'TERMS_OF_SERVICE'
+  | 'PRIVACY_POLICY'
+  | 'TELECONSULTATION'
+  | 'MARKETING_MESSAGES';
+
+export interface ConsentState {
+  purpose: ConsentPurpose;
+  granted: boolean;
+  /** They agreed to older wording and should be shown the current text. */
+  stale: boolean;
+  policyVersion: string | null;
+  currentVersion: string;
+  grantedAt: string | null;
+  /** Withdrawing this one means the account stops being usable. */
+  essential: boolean;
+}
+
+export const fetchMyConsents = async () =>
+  (await api.get<{ consents: ConsentState[] }>('/patients/me/consents')).data.consents;
+
+export const grantConsent = async (purpose: ConsentPurpose, policyVersion?: string) =>
+  (await api.post('/patients/me/consents', { purpose, policyVersion })).data;
+
+export const withdrawConsent = async (purpose: ConsentPurpose) =>
+  (
+    await api.delete<{ essential: boolean; message: string }>(
+      `/patients/me/consents/${purpose}`
+    )
+  ).data;
+
+/** Everything the platform holds about the caller. */
+export const exportMyData = async () =>
+  (await api.get<{ data: Record<string, unknown> }>('/patients/me/export')).data.data;
+
+export interface CloseAccountResult {
+  anonymisedAt: string;
+  removed: {
+    profile: boolean;
+    addresses: number;
+    devices: number;
+    notifications: number;
+    documents: number;
+  };
+  retained: string[];
+}
+
+/**
+ * Closes the account for good.
+ *
+ * `confirmPhoneNumber` must match the number this account signs in with — the
+ * server checks it. A typed confirmation rather than a flag, because there is
+ * no undo and a boolean is one mis-tap away from an irreversible action.
+ */
+export const closeMyAccount = async (confirmPhoneNumber: string, reason?: string) =>
+  (
+    await api.delete<CloseAccountResult>('/patients/me', {
+      data: { confirmPhoneNumber, reason },
+    })
+  ).data;

@@ -5,6 +5,7 @@ import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { slotHasPassed } from '../utils/clock.js';
 import { notify } from './notificationService.js';
 import { refundForTargetService } from './paymentService.js';
+import { windowFor, type PageRequest } from '../utils/pagination.js';
 
 const appointmentView = {
   id: true,
@@ -126,12 +127,16 @@ export const bookAppointmentService = async (
   }
 };
 
-export const getPatientAppointmentsService = (patientId: string) =>
-  prisma.appointment.findMany({
+export const getPatientAppointmentsService = (patientId: string, page?: PageRequest) => {
+  const w = windowFor(page);
+  return prisma.appointment.findMany({
     where: { patientId },
     select: appointmentView,
     orderBy: { createdAt: 'desc' },
+    take: w.take,
+    skip: w.skip,
   });
+};
 
 /**
  * The doctor's queue.

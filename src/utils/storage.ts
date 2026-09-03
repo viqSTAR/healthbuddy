@@ -11,6 +11,7 @@ import {
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { env } from '../config/env.js';
+import { DOCUMENT_LINK_KEY } from './secrets.js';
 import { AppError } from './AppError.js';
 
 /**
@@ -195,7 +196,7 @@ export const buildStorageKey = (ownerUserId: string, fileName: string): string =
 
 /* ---------- Short-lived signed links ---------- */
 
-const linkSecret = env.JWT_ACCESS_SECRET;
+const linkSecret = DOCUMENT_LINK_KEY;
 
 /**
  * Mints `<expiryEpochSeconds>.<signature>` for a document id. Used where a bare

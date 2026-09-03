@@ -144,3 +144,19 @@ export const connectDatabase = async (): Promise<void> => {
 };
 
 export const disconnectDatabase = () => basePrisma.$disconnect();
+
+/**
+ * Whether the database is answering *right now*.
+ *
+ * A real query rather than a connection-pool status: a pooled handle can look
+ * healthy while the server behind it is gone, which is exactly the state a
+ * readiness check exists to catch.
+ */
+export const isDatabaseReady = async (): Promise<boolean> => {
+  try {
+    await basePrisma.$queryRaw`SELECT 1`;
+    return true;
+  } catch {
+    return false;
+  }
+};

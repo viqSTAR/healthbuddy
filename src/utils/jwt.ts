@@ -29,27 +29,44 @@ export interface JwtPayload {
 /** `typ` separates the two token classes so a refresh token cannot authenticate a request. */
 type TokenType = 'access' | 'refresh';
 
-interface SignedClaims extends JwtPayload {
+export interface SignedClaims extends JwtPayload {
   typ: TokenType;
   jti: string;
+  /**
+   * The account's `tokenVersion` when this was minted. Checked against the
+   * live value on every request, which is what makes a token revocable at all —
+   * see sessionService.
+   */
+  tv: number;
 }
 
-const sign = (payload: JwtPayload, typ: TokenType): string => {
+/**
+ * The only algorithm this service issues or accepts.
+ *
+ * Pinned rather than left to the library's default list. `jsonwebtoken` picks
+ * the verifier from the token's own `alg` header when no list is given, which
+ * means the token gets a say in how it is checked — the shape of every JWT
+ * confusion bug there has ever been. Nothing here is asymmetric, so there is
+ * exactly one right answer and it belongs on this side.
+ */
+const ALGORITHM = 'HS256' as const;
+
+const sign = (payload: JwtPayload, typ: TokenType, tokenVersion: number): string => {
   const secret = typ === 'access' ? env.JWT_ACCESS_SECRET : env.JWT_REFRESH_SECRET;
   const expiresIn = typ === 'access' ? env.JWT_ACCESS_EXPIRES_IN : env.JWT_REFRESH_EXPIRES_IN;
 
-  const claims: SignedClaims = { ...payload, typ, jti: randomUUID() };
-  return jwt.sign(claims, secret, { expiresIn } as SignOptions);
+  const claims: SignedClaims = { ...payload, typ, jti: randomUUID(), tv: tokenVersion };
+  return jwt.sign(claims, secret, { expiresIn, algorithm: ALGORITHM } as SignOptions);
 };
 
-export const generateTokens = (payload: JwtPayload) => ({
-  accessToken: sign(payload, 'access'),
-  refreshToken: sign(payload, 'refresh'),
+export const generateTokens = (payload: JwtPayload, tokenVersion: number) => ({
+  accessToken: sign(payload, 'access', tokenVersion),
+  refreshToken: sign(payload, 'refresh', tokenVersion),
 });
 
 const verify = (token: string, typ: TokenType): SignedClaims => {
   const secret = typ === 'access' ? env.JWT_ACCESS_SECRET : env.JWT_REFRESH_SECRET;
-  const decoded = jwt.verify(token, secret) as SignedClaims;
+  const decoded = jwt.verify(token, secret, { algorithms: [ALGORITHM] }) as SignedClaims;
 
   // Reject a token minted for the other purpose even if the secret matched.
   if (decoded.typ !== typ) {

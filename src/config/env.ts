@@ -58,6 +58,24 @@ const envSchema = z
     CORS_ORIGINS: z.string().optional().default(''),
 
     /**
+     * Where unhandled faults are reported. Unset means nowhere, which is right
+     * for development and a warning at boot in production — see
+     * utils/errorReporter.
+     */
+    SENTRY_DSN: z.string().optional(),
+
+    /**
+     * Global per-IP request ceiling, per minute.
+     *
+     * Configurable rather than a constant for two reasons: a deployment behind
+     * a CDN or a corporate NAT sees many real users share one address and needs
+     * it higher, and a load test measuring the *application* has to be able to
+     * get past it — otherwise every run past 300 requests measures the limiter.
+     * The default is unchanged.
+     */
+    RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(100_000).default(300),
+
+    /**
      * Where the platform is reachable from outside.
      *
      * Printed onto prescriptions as the address a pharmacist types to check the
@@ -267,6 +285,38 @@ const envSchema = z
           code: 'custom',
           path: ['CORS_ORIGINS'],
           message: 'CORS_ORIGINS must list explicit origins in production.',
+        });
+      }
+      /**
+       * This one is printed onto paper.
+       *
+       * A prescription carries this origin as the address a pharmacist types to
+       * check the document is genuine. Left at its development default, every
+       * prescription the platform issues tells the person holding it to visit a
+       * machine that is not theirs — and the verification step that makes a
+       * printed prescription trustworthy silently stops existing.
+       */
+      const host = (() => {
+        try {
+          return new URL(cfg.PUBLIC_BASE_URL).hostname;
+        } catch {
+          return '';
+        }
+      })();
+      if (['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(host)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['PUBLIC_BASE_URL'],
+          message:
+            `PUBLIC_BASE_URL is ${cfg.PUBLIC_BASE_URL} in production. It is printed on every ` +
+            'prescription as the address for verifying it is genuine, so it must be the public origin.',
+        });
+      }
+      if (!cfg.PUBLIC_BASE_URL.startsWith('https://')) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['PUBLIC_BASE_URL'],
+          message: 'PUBLIC_BASE_URL must be https in production.',
         });
       }
     }

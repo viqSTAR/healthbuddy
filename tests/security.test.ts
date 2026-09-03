@@ -19,7 +19,7 @@ import {
   anOrderableMedicine,
 } from './helpers.js';
 import { cacheStore } from '../src/config/redis.js';
-import { env } from '../src/config/env.js';
+import { MOCK_PAYMENT_KEY } from '../src/utils/secrets.js';
 
 after(async () => {
   await cleanupTestUsers();
@@ -679,7 +679,10 @@ describe('payments', () => {
       id: `evt_${Date.now()}`,
       orderId: 'order_mock_nothing_matches_this',
     });
-    const signature = createHmac('sha256', env.JWT_ACCESS_SECRET).update(body).digest('hex');
+    // The mock gateway signs with a key derived for that purpose, not with the
+    // token secret — see utils/secrets. Reaching for the raw secret here would
+    // pass even if the two were wired to different keys by mistake.
+    const signature = createHmac('sha256', MOCK_PAYMENT_KEY).update(body).digest('hex');
 
     // Sent as a string, exactly as a gateway sends it. Passing a Buffer here
     // would have superagent re-encode it as {"type":"Buffer","data":[...]},

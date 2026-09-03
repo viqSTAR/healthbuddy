@@ -17,9 +17,35 @@
     "all:web": "concurrently -n patient,doctor,partner,agent -c green,blue,magenta,cyan \"npm:web --workspace @healthbuddy/patient\" \"npm:web --workspace @healthbuddy/doctor\" \"npm:web --workspace @healthbuddy/partner\" \"npm:web --workspace @healthbuddy/agent\"",
 
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "doctor:all": "npm run doctor --workspaces --if-present"
   },
   "devDependencies": {
     "concurrently": "^10.0.4"
+  },
+
+  "//overrides": [
+    "Transitive dependencies of the Expo/Metro BUILD toolchain, pinned past their",
+    "advisories. Expo is already on the current SDK, so there is no version of it",
+    "that pulls these in fixed — an override is the only lever available.",
+    "",
+    "Only nanoid is forced, because it is the only one where the patched version",
+    "sits inside the range its dependents ask for. Left alone deliberately:",
+    "",
+    "  image-size  1.2.1, patched at 2.0.3  — a major bump into Metro's internals",
+    "  uuid        7.0.3, patched at 11.1.1 — four majors",
+    "  postcss     8.4.49, patched at 8.5.23 — @expo/metro-config pins ~8.4.32",
+    "",
+    "All three are denial-of-service or file-read issues in code that runs at build",
+    "time over assets and stylesheets from this repository. There is no attacker on",
+    "that path: the inputs are files we wrote. Forcing them would risk breaking the",
+    "bundler for all four apps to close a hole nobody can reach. Nothing here ships",
+    "in an app binary. Revisit when a future Expo SDK moves them.",
+    "",
+    "The backend — which does face the internet — carries zero advisories, and CI",
+    "keeps it that way."
+  ],
+  "overrides": {
+    "nanoid": "^3.3.18"
   }
 }

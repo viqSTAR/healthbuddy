@@ -14,6 +14,10 @@ import {
 } from '../utils/otp.js';
 import { AppError } from '../utils/AppError.js';
 import { logger } from '../utils/logger.js';
+import { assertAccountUsable, revokeSessions } from './sessionService.js';
+
+/** Masks all but the last 3 digits so logs never carry a full phone number. */
+const maskPhone = (phone: string) => phone.replace(/.(?=.{3})/g, '•');
 
 const otpKey = (phone: string) => `otp:${phone}`;
 const otpAttemptsKey = (phone: string) => `otp:attempts:${phone}`;
@@ -120,9 +124,21 @@ export const verifyOtpService = async (rawPhone: string, otp: string) => {
   await cacheStore.del(otpAttemptsKey(phoneNumber));
 
   const user = await loadOrRegisterUser(phoneNumber);
-  const tokens = generateTokens(toTokenPayload(user));
 
-  logger.info(`[auth] ${phoneNumber} authenticated as ${user.role}`);
+  /**
+   * A correct code is not the same as a permitted sign-in.
+   *
+   * This check was absent, which made the admin panel's Suspend button
+   * decorative: a suspended account passed OTP verification like any other and
+   * walked away with a fresh, fully privileged token pair.
+   */
+  assertAccountUsable(user);
+
+  const tokens = generateTokens(toTokenPayload(user), user.tokenVersion);
+
+  // Masked: an authentication log is one of the likeliest things to be shipped
+  // off-box to an aggregator, and a phone number is the account identifier here.
+  logger.info(`[auth] ${maskPhone(phoneNumber)} authenticated as ${user.role}`);
   return { user: toPublicUser(user), tokens };
 };
 
@@ -142,9 +158,53 @@ export const refreshTokensService = async (refreshToken: string) => {
 
   if (!user) throw new AppError('Account no longer exists.', 401);
 
+  // Suspending an account has to reach the refresh endpoint too, or a suspended
+  // user simply trades their week-long refresh token for a new access token
+  // every fifteen minutes and never notices.
+  assertAccountUsable(user);
+
+  /**
+   * A refresh token from before the last revocation is spent. This is what
+   * makes signing out mean something on a device that still holds the token,
+   * and what stops a stolen refresh token outliving the moment it is reported.
+   */
+  if ((claims.tv ?? 0) < user.tokenVersion) {
+    throw new AppError('This session has ended. Please sign in again.', 401);
+  }
+
   // Role is re-read from the database, so a revoked or downgraded role takes
   // effect on the next refresh rather than persisting for the token's lifetime.
-  return { user: toPublicUser(user), tokens: generateTokens(toTokenPayload(user)) };
+  return {
+    user: toPublicUser(user),
+    tokens: generateTokens(toTokenPayload(user), user.tokenVersion),
+  };
+};
+
+/**
+ * Signing out.
+ *
+ * Deliberately global rather than per-device: this raises `tokenVersion`, which
+ * ends every session the account holds. The alternative — tracking individual
+ * token ids so one device can leave while others stay — is a session table, and
+ * a session table that is not also consulted on every request buys nothing. The
+ * property worth having is that a person who has lost a phone can make the
+ * tokens on it stop working, and that is this.
+ */
+export const signOutService = async (refreshToken: string | null): Promise<void> => {
+  if (!refreshToken) return;
+
+  let claims;
+  try {
+    claims = verifyRefreshToken(refreshToken);
+  } catch {
+    // Nothing to revoke, and nothing worth telling the caller: signing out with
+    // an expired token is a success from where they are standing.
+    return;
+  }
+
+  await revokeSessions(claims.userId).catch((err) => {
+    logger.error(`[auth] sign-out could not revoke sessions for ${claims.userId}`, err);
+  });
 };
 
 /** Admin-only provisioning of elevated roles. */
@@ -155,7 +215,7 @@ export const provisionRoleService = async (
 ) => {
   const phoneNumber = normalisePhone(rawPhone);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const user = await tx.user.upsert({
       where: { phoneNumber },
       update: { role: role as PrismaRole },
@@ -208,4 +268,17 @@ export const provisionRoleService = async (
 
     return { id: user.id, phoneNumber: user.phoneNumber, role: user.role };
   });
+
+  /**
+   * A role change has to end the account's existing sessions.
+   *
+   * Profile ids and the role are baked into the token at sign-in, so a person
+   * who was signed in as a PATIENT when they were promoted keeps a token that
+   * says PATIENT — and, worse in the other direction, a demoted admin keeps an
+   * admin token until it expires. Forcing a fresh sign-in is the only way the
+   * new grant and the old one cannot overlap.
+   */
+  await revokeSessions(result.id);
+
+  return result;
 };

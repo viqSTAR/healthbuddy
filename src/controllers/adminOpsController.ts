@@ -31,8 +31,13 @@ import {
   upsertMedicineService,
   listLabPackagesAdminService,
   upsertLabPackageService,
+  adminUpsertInventoryService,
+  adminRecordStockMovementService,
+  adminRemoveInventoryService,
+  adminSetStockCountService,
 } from '../services/adminOpsService.js';
 import { asyncHandler, requireUser, type AuthenticatedRequest } from '../middlewares/auth.js';
+import type { StockMovementReason } from '@prisma/client';
 
 /**
  * Thin handlers: every one of these validates through zod in the route, so the
@@ -59,21 +64,30 @@ export const getOverviewHandler = asyncHandler(async (_req: AuthenticatedRequest
 
 /* ---------- Patients ---------- */
 
+/** Who is reading, so the access can be attributed in the audit log. */
+const viewer = (req: AuthenticatedRequest) => ({
+  userId: requireUser(req).userId,
+  ipAddress: req.ip ?? null,
+});
+
 export const listPatientsHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const query = q(req);
   ok(
     res,
-    await listPatientsService({
-      page: query.page,
-      limit: query.limit,
-      ...pick(query, ['search']),
-    })
+    await listPatientsService(
+      {
+        page: query.page,
+        limit: query.limit,
+        ...pick(query, ['search']),
+      },
+      viewer(req)
+    )
   );
 });
 
 export const getPatientHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params as { id: string };
-  ok(res, await getPatientService(id));
+  ok(res, await getPatientService(id, viewer(req)));
 });
 
 /* ---------- Doctors ---------- */
@@ -461,3 +475,84 @@ export const updateAgentHandler = asyncHandler(async (req: AuthenticatedRequest,
 
   ok(res, { agent });
 });
+
+/* ---------- Admin stock control ---------- */
+
+export const adminUpsertInventoryHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      medicineId: string;
+      price: number;
+      stock?: number;
+      reorderLevel?: number;
+      isActive?: boolean;
+      batchNumber?: string;
+      expiryDate?: string;
+    };
+
+    ok(res, {
+      item: await adminUpsertInventoryService({
+        actorUserId: requireUser(req).userId,
+        pharmacyId: id,
+        ipAddress: req.ip ?? null,
+        ...body,
+      }),
+    });
+  }
+);
+
+export const adminRecordStockMovementHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      medicineId: string;
+      quantity: number;
+      reason: StockMovementReason;
+      note?: string;
+      batchNumber?: string;
+      expiryDate?: string;
+    };
+
+    res.status(201).json({
+      success: true,
+      movement: await adminRecordStockMovementService({
+        actorUserId: requireUser(req).userId,
+        pharmacyId: id,
+        ipAddress: req.ip ?? null,
+        ...body,
+      }),
+    });
+  }
+);
+
+export const adminRemoveInventoryHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id, medicineId } = req.params as { id: string; medicineId: string };
+
+    ok(res, {
+      removed: await adminRemoveInventoryService({
+        actorUserId: requireUser(req).userId,
+        pharmacyId: id,
+        medicineId,
+        ipAddress: req.ip ?? null,
+      }),
+    });
+  }
+);
+
+export const adminSetStockCountHandler = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { medicineId: string; countedQuantity: number; note?: string };
+
+    ok(res, {
+      movement: await adminSetStockCountService({
+        actorUserId: requireUser(req).userId,
+        pharmacyId: id,
+        ipAddress: req.ip ?? null,
+        ...body,
+      }),
+    });
+  }
+);

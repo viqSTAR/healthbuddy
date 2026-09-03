@@ -1,0 +1,28 @@
+# Keeping the build context small is most of what makes a build fast — every
+# file here would otherwise be uploaded to the daemon before the first step.
+
+node_modules
+dist
+admin
+mobile
+
+.git
+.github
+.claude
+
+# Never bake secrets into an image. Configuration arrives as environment
+# variables at run time; a .env copied in is a credential inside every layer,
+# recoverable from the image whatever a later step deletes.
+.env
+.env.*
+!.env.example
+
+uploads
+coverage
+*.log
+*.tsbuildinfo
+
+# Docs and tests are not needed to run the server.
+*.md
+tests
+scripts

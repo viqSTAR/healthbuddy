@@ -65,6 +65,25 @@ export const AuthProvider: React.FC<{
       await unregisterPushToken(pushToken.current).catch(() => undefined);
       pushToken.current = null;
     }
+
+    /**
+     * Tell the server, not just the keychain.
+     *
+     * Clearing the local tokens is what signing out *looks* like, but the
+     * refresh token is a bearer credential the server had no record of
+     * cancelling — on its own, forgetting it locally left a working seven-day
+     * key to the account in whatever logs, backups or clipboards it had already
+     * reached. Posting it back revokes every session on the account.
+     *
+     * Best-effort on purpose: someone signing out on a train with no signal
+     * must still end up signed out on the device. The local clear below is
+     * unconditional.
+     */
+    const refreshToken = await tokenStore.getRefreshToken().catch(() => null);
+    if (refreshToken) {
+      await api.post('/auth/logout', { refreshToken }).catch(() => undefined);
+    }
+
     await tokenStore.clearTokens();
     setUser(null);
     setPendingPhone(null);

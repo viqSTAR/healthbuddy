@@ -4,6 +4,7 @@ import {
   verifyOtpService,
   refreshTokensService,
   provisionRoleService,
+  signOutService,
 } from '../services/authService.js';
 import { startOtpCooldown } from '../middlewares/rateLimiter.js';
 import { asyncHandler, type AuthenticatedRequest } from '../middlewares/auth.js';
@@ -50,8 +51,20 @@ export const refreshTokenHandler = asyncHandler(async (req: AuthenticatedRequest
   res.status(200).json({ success: true, ...result });
 });
 
-/** Drops the browser's refresh cookie. The access token expires on its own. */
-export const logoutHandler = asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+/**
+ * Ends the session for real.
+ *
+ * Clearing the cookie was all this used to do, which meant signing out was a
+ * change of mind on one browser and nothing more: the refresh token itself
+ * stayed valid for a week, and on the mobile apps — which never had a cookie —
+ * sign-out revoked precisely nothing. Raising the account's token version
+ * invalidates every token already issued, wherever it is.
+ *
+ * Answers 200 either way. A caller trying to end a session should never be told
+ * "your token was already invalid" and left wondering whether they are out.
+ */
+export const logoutHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  await signOutService(readRefreshToken(req));
   clearRefreshCookie(res);
   res.status(200).json({ success: true, message: 'Signed out.' });
 });

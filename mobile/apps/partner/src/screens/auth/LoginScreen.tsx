@@ -85,8 +85,14 @@ export const LoginScreen: React.FC = () => {
               }}
               keyboardType="phone-pad"
               autoComplete="tel"
+              // iOS reads this, not `autoComplete`, to offer the number from
+              // Contacts. Without it the field is the one place in the app a
+              // provider has to type their own phone number from memory.
+              textContentType="telephoneNumber"
               error={error}
               hint={error ? undefined : "We'll text you a one-time code."}
+              onSubmitEditing={submit}
+              returnKeyType="go"
             />
 
             <Button label="Continue" onPress={submit} loading={loading} fullWidth />

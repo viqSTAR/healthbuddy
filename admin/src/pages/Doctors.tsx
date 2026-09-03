@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import { fetchDoctors, fetchDoctor, updateDoctor, type DoctorRow } from '../api/endpoints';
 import {
@@ -367,7 +368,16 @@ export const Doctors: React.FC = () => {
                   {data.doctors.map((d) => (
                     <tr key={d.id} onClick={() => setOpenId(d.id)} style={{ cursor: 'pointer' }}>
                       <td>
-                        <button className="link-btn">{d.name}</button>
+                        {/* The row opens the drawer for a quick edit; the name
+                            goes to the doctor's own page, where the credentials
+                            and the full consultation history live. */}
+                        <Link
+                          to={`/doctors/${d.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="link-btn"
+                        >
+                          {d.name}
+                        </Link>
                         <span className="sub">
                           {d.specialty} · {d.experienceYears}y
                         </span>

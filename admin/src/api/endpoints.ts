@@ -76,6 +76,8 @@ export interface AdminUser {
   role: Role;
   isVerified: boolean;
   isSuspended: boolean;
+  /** Set once the account has been closed on request. One-way. */
+  anonymisedAt: string | null;
   createdAt: string;
   patient?: { fullName: string } | null;
   doctor?: { name: string; specialty: string } | null;
@@ -187,6 +189,28 @@ export const fetchUsers = async (params?: { role?: Role; page?: number; limit?: 
 export const setUserSuspended = async (id: string, suspended: boolean, reason?: string) =>
   (await api.patch<{ user: AdminUser }>(`/admin/users/${id}/suspension`, { suspended, reason })).data
     .user;
+
+export interface EraseResult {
+  userId: string;
+  anonymisedAt: string;
+  removed: {
+    profile: boolean;
+    addresses: number;
+    devices: number;
+    notifications: number;
+    documents: number;
+  };
+  retained: string[];
+}
+
+/**
+ * Closes an account on the holder's behalf. Irreversible.
+ *
+ * Not a DELETE, because the consultation, prescription and payment records
+ * survive — what is destroyed is the identity attached to them.
+ */
+export const eraseUser = async (id: string, reason?: string) =>
+  (await api.post<EraseResult>(`/admin/users/${id}/erase`, { reason })).data;
 
 /* ---------- Audit ---------- */
 
@@ -497,6 +521,15 @@ export interface DoctorDetail {
     slot: { date: string; startTime: string };
   }[];
   earnings: { total: number; legs: number };
+  /** Credentials, metadata only — bytes come through the authorised files API. */
+  documents: {
+    id: string;
+    kind: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    createdAt: string;
+  }[];
 }
 
 export const fetchDoctor = async (id: string) =>
@@ -1149,3 +1182,86 @@ export const saveLabPackage = async (input: LabPackageInput, id?: string) =>
       ? api.put<{ labPackage: LabPackageAdminRow }>(`/admin/lab-packages/${id}`, input)
       : api.post<{ labPackage: LabPackageAdminRow }>('/admin/lab-packages', input))
   ).data.labPackage;
+
+/* ---------- Retention ---------- */
+
+export interface RetentionReport {
+  ranAt: string;
+  dryRun: boolean;
+  swept: Record<string, number>;
+  awaitingReview: Record<string, number>;
+  note: string;
+}
+
+/** Reports only. A GET must never delete. */
+export const fetchRetentionReport = async () =>
+  (await api.get<RetentionReport>('/admin/retention')).data;
+
+/** `apply: false` reports; `true` deletes the short-retention rows. */
+export const runRetentionSweep = async (apply: boolean) =>
+  (await api.post<RetentionReport>('/admin/retention/run', { apply })).data;
+
+/* ---------- Admin stock control ---------- */
+
+/**
+ * Editing a partner's shelf.
+ *
+ * `stock` is an *opening* quantity and only applies the first time a medicine
+ * is listed. After that the number moves through the ledger, so changing it is
+ * `recordStockMovement` with a reason — which is the whole point of the ledger
+ * and the reason a shop's stock cannot be silently rewritten.
+ */
+export const adminUpsertInventory = async (
+  pharmacyId: string,
+  body: {
+    medicineId: string;
+    price: number;
+    stock?: number;
+    reorderLevel?: number;
+    isActive?: boolean;
+    batchNumber?: string;
+    expiryDate?: string;
+  }
+) =>
+  (await api.put<{ item: InventoryLine }>(`/admin/pharmacies/${pharmacyId}/inventory`, body)).data
+    .item;
+
+/** `quantity` is always positive; `reason` decides the direction. */
+export const adminRecordStockMovement = async (
+  pharmacyId: string,
+  body: {
+    medicineId: string;
+    quantity: number;
+    reason: StockMovementReason;
+    note?: string;
+    batchNumber?: string;
+    expiryDate?: string;
+  }
+) =>
+  (
+    await api.post<{ movement: { medicineId: string; stock: number; delta: number } }>(
+      `/admin/pharmacies/${pharmacyId}/stock-movements`,
+      body
+    )
+  ).data.movement;
+
+export const adminRemoveInventory = async (pharmacyId: string, medicineId: string) =>
+  (await api.delete(`/admin/pharmacies/${pharmacyId}/inventory/${medicineId}`)).data;
+
+/**
+ * A recount: the counted total goes in, the ledger derives the difference.
+ *
+ * Deliberately not a movement. `CORRECTION` is refused on the movement route
+ * precisely so nobody enters a correction whose size they worked out in their
+ * head — the arithmetic is the platform's job.
+ */
+export const adminSetStockCount = async (
+  pharmacyId: string,
+  body: { medicineId: string; countedQuantity: number; note?: string }
+) =>
+  (
+    await api.post<{ movement: { medicineId: string; stock: number; delta: number } }>(
+      `/admin/pharmacies/${pharmacyId}/stock-count`,
+      body
+    )
+  ).data.movement;

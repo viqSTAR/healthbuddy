@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Pressable,
   Linking,
-  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -68,6 +67,8 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({ navigation, ro
   const [ending, setEnding] = useState(false);
   const webRef = useRef<WebView>(null);
   const mounted = useRef(true);
+  /** Set once the exit has been agreed, so the guard below stands aside. */
+  const leaving = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -112,20 +113,46 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({ navigation, ro
     navigation.goBack();
   }, [navigation]);
 
-  const confirmLeave = useCallback(() => {
-    Alert.alert('Leave the consultation?', 'You can rejoin while the slot is open.', [
-      { text: 'Stay', style: 'cancel' },
-      { text: 'Leave', style: 'destructive', onPress: leave },
-    ]);
-    return true;
-  }, [leave]);
-
-  // Android back must not silently drop someone out of a live consultation.
+  /**
+   * One guard over every way out of a live room.
+   *
+   * This used to be a `BackHandler` subscription, which only ever fires on
+   * Android. iOS has no hardware back button — it has the edge swipe, which the
+   * stack navigator enables by default — so the confirmation Android showed
+   * simply did not exist there: a patient brushing the left edge dropped out of
+   * a consultation mid-sentence, and a doctor could not tell that from someone
+   * hanging up.
+   *
+   * `beforeRemove` sits under all three routes out — the hardware button, the
+   * swipe, and the arrow in the call bar — so the two platforms now ask the same
+   * question. The screen is left by re-dispatching the very action that was
+   * intercepted, which keeps "back" meaning back and "go to Home" meaning Home.
+   */
   useEffect(() => {
     if (phase !== 'live') return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', confirmLeave);
-    return () => sub.remove();
-  }, [phase, confirmLeave]);
+
+    const unsubscribe = navigation.addListener(
+      'beforeRemove',
+      (event: { preventDefault: () => void; data: { action: unknown } }) => {
+        if (leaving.current) return;
+        event.preventDefault();
+
+        Alert.alert('Leave the consultation?', 'You can rejoin while the slot is open.', [
+          { text: 'Stay', style: 'cancel' },
+          {
+            text: 'Leave',
+            style: 'destructive',
+            onPress: () => {
+              leaving.current = true;
+              navigation.dispatch(event.data.action);
+            },
+          },
+        ]);
+      }
+    );
+
+    return unsubscribe;
+  }, [navigation, phase]);
 
   /** Doctor only: closes the consultation for both sides. */
   const endForEveryone = () =>
@@ -138,6 +165,8 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({ navigation, ro
           setEnding(true);
           try {
             await endConsultation(appointmentId);
+            // Already agreed to above — the leave guard has nothing to ask.
+            leaving.current = true;
             navigation.goBack();
           } catch (err) {
             Alert.alert('Could not end it', errorMessage(err));
@@ -154,7 +183,7 @@ export const VideoCallScreen: React.FC<VideoCallScreenProps> = ({ navigation, ro
     return (
       <SafeAreaView style={styles.callSafe} edges={['top', 'bottom']}>
         <View style={styles.callBar}>
-          <Pressable onPress={confirmLeave} hitSlop={12} accessibilityLabel="Leave call">
+          <Pressable onPress={leave} hitSlop={12} accessibilityLabel="Leave call">
             <Icon name="arrow_back" size={22} color={colors.inverseOnSurface} />
           </Pressable>
           <View style={styles.flex}>

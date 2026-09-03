@@ -10,7 +10,7 @@ without it.
 ```bash
 # Backend
 npm install
-npm run prisma:push
+npm run prisma:migrate
 npm run seed
 
 # Mobile (one install covers all three apps)

@@ -22,13 +22,17 @@ pharmacy account should never carry the patient app's location permission, and a
 doctor's clinical workflow is not a variation on a consumer booking flow. The
 admin panel is web because document review and dense tables do not fit a phone.
 
+> **Going live?** [LAUNCH-CHECKLIST.md](LAUNCH-CHECKLIST.md) is the ordered list
+> of what remains — legal, accounts and deployment — with the two long-lead
+> items flagged so they do not become the critical path.
+
 ## Getting started
 
 ```bash
 # Backend
 npm install
 cp .env.example .env          # then fill in the required values
-npm run prisma:push           # sync the schema
+npm run prisma:migrate        # apply migrations (use prisma:deploy in production)
 npm run seed                  # catalogue + demo provider accounts
 npm run dev                   # http://localhost:5000
 ```
@@ -43,6 +47,19 @@ npm run all                   # all three, or: npm run patient / doctor / partne
 # Admin panel
 cd admin && npm install && npm run dev
 ```
+
+## Going live
+
+```bash
+npm run preflight        # every external dependency, actually exercised
+npm run restore:drill    # prove a backup restores
+npm run loadtest         # find what gives way first
+npm run retention        # what the retention policy would remove (dry run)
+```
+
+The go/no-go list is [ARCHITECTURE.md §12](ARCHITECTURE.md#12-production-cutover).
+Nothing in the codebase blocks launch; the remaining items are a legal review,
+two named people, and three service accounts.
 
 | Service | URL |
 | --- | --- |

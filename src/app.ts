@@ -6,7 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { corsOrigins, isProduction } from './config/env.js';
-import { globalApiRateLimiter } from './middlewares/rateLimiter.js';
+import { isDatabaseReady } from './config/db.js';
+import { isStoreReady } from './config/redis.js';
+import { globalApiRateLimiter, webhookRateLimiter } from './middlewares/rateLimiter.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 
 import authRoutes from './routes/authRoutes.js';
@@ -84,6 +86,9 @@ app.use(
  */
 app.post(
   '/api/v1/payments/webhook',
+  // Its own limiter: sitting ahead of the global one is what this route needs
+  // for the raw body, and what previously left it entirely uncapped.
+  webhookRateLimiter,
   express.raw({ type: '*/*', limit: '256kb' }),
   paymentWebhookHandler
 );
@@ -115,10 +120,42 @@ app.use(
 
 app.use(globalApiRateLimiter);
 
+/**
+ * Liveness: is this process running?
+ *
+ * Deliberately answers without touching anything. An orchestrator uses this to
+ * decide whether to *restart* the container, and restarting a healthy process
+ * because the database is briefly unreachable turns a recoverable dependency
+ * outage into a crash loop.
+ */
 app.get('/health', (_req, res) => {
   res.status(200).json({
     status: 'UP',
     service: 'Health Buddy Backend',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * Readiness: should this process receive traffic?
+ *
+ * The distinction matters and was missing — there was only the liveness check,
+ * so a load balancer kept routing to an instance whose database had gone away
+ * and every request it received became a 500. This one checks the dependencies
+ * a request actually needs, and answering 503 takes the instance out of
+ * rotation until they come back.
+ */
+app.get('/health/ready', async (_req, res) => {
+  const [database, cache] = await Promise.all([isDatabaseReady(), Promise.resolve(isStoreReady())]);
+
+  // Redis has a documented process-local fallback outside production, so a
+  // developer without it running is still "ready" — in production it is not
+  // optional, and liveClient() refuses to serve from memory there anyway.
+  const ready = database && (cache || !isProduction);
+
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'READY' : 'NOT_READY',
+    checks: { database, cache },
     timestamp: new Date().toISOString(),
   });
 });

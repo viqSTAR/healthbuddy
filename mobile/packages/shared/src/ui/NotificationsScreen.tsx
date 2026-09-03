@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { Text } from './Text';
 import { Icon } from './Icon';
@@ -9,7 +9,7 @@ import { EmptyState, Loading, ErrorState } from './EmptyState';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/typography';
 import { useAsync } from '../hooks/useAsync';
-import { isExpoGo } from '../services/notifications';
+import { isExpoGo, syncNotificationBadge } from '../services/notifications';
 import {
   fetchNotifications,
   markAllNotificationsRead,
@@ -53,6 +53,18 @@ export const NotificationsScreen: React.FC<{
   onOpen?: (notification: AppNotification) => void;
 }> = ({ navigation, onOpen }) => {
   const feed = useAsync(() => fetchNotifications({ page: 1 }), []);
+
+  /**
+   * The feed is the only place that knows the true unread count, so it is the
+   * place that owns the iOS app-icon badge. Runs on every load and after each
+   * optimistic read below, which is what keeps the badge from outliving the
+   * notifications it was counting.
+   */
+  const unreadCount = feed.data?.unread;
+  useEffect(() => {
+    if (unreadCount === undefined) return;
+    void syncNotificationBadge(unreadCount);
+  }, [unreadCount]);
 
   const open = async (notification: AppNotification) => {
     if (!notification.readAt) {

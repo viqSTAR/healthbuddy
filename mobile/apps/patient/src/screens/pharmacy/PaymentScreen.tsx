@@ -4,18 +4,23 @@ import {
   Alert,
   Button,
   Card,
+  GatewayCheckout,
   Icon,
   Loading,
   Screen,
   Text,
   TopBar,
   colors,
+  confirmPayment,
   errorMessage,
   radius,
   rupees,
   simulatePayment,
   spacing,
   startCheckout,
+  useAuth,
+  type Checkout,
+  type GatewayResult,
   type PaymentMethod,
   type PaymentPurpose,
 } from '@healthbuddy/shared';
@@ -79,8 +84,11 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
     addressText,
   } = (route.params ?? {}) as PaymentRouteParams;
 
+  const { user } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>('UPI');
   const [paying, setPaying] = useState(false);
+  /** Set once the server hands back a real gateway order — opens the sheet. */
+  const [gateway, setGateway] = useState<Checkout | null>(null);
 
   const options = METHODS.filter((m) => m.value !== 'COD' || allowCod);
 
@@ -102,6 +110,30 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
       ...(testName ? { testName } : {}),
     });
 
+  /**
+   * Verifies the gateway's result and finishes.
+   *
+   * What the sheet hands back is a message from a web page, so it decides
+   * nothing: `confirmPayment` re-checks the signature server-side against the
+   * key secret before any order is released. A forged success gets a 403 here.
+   */
+  const settleWithGateway = async (result: GatewayResult) => {
+    setGateway(null);
+    setPaying(true);
+    try {
+      await confirmPayment({
+        orderId: result.razorpay_order_id,
+        paymentId: result.razorpay_payment_id,
+        signature: result.razorpay_signature,
+      });
+      done(method);
+    } catch (err) {
+      Alert.alert('We could not confirm that payment', errorMessage(err));
+    } finally {
+      setPaying(false);
+    }
+  };
+
   const pay = async () => {
     setPaying(true);
     try {
@@ -117,12 +149,20 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
       }
 
       /**
-       * With a real gateway this is where its sheet opens and hands back a
-       * signature to verify. Under PAYMENT_PROVIDER=mock the server exposes a
-       * stand-in so the whole path — checkout, settle, split, release — can be
-       * walked without a gateway account. It 404s once a real provider is
-       * configured, and that error is worth showing rather than swallowing.
+       * A real gateway hands back an order id and a public key; the mock
+       * provider hands back neither, because there is nothing to open.
+       *
+       * Branching on the checkout the server returned rather than on a build
+       * flag means the app follows whatever the deployment is configured for —
+       * and it stops the previous behaviour, where the only path was the
+       * development stand-in and prepaid payment simply did not work in
+       * production.
        */
+      if (checkout.gatewayOrderId && checkout.publicKey) {
+        setGateway(checkout);
+        return;
+      }
+
       await simulatePayment(checkout.paymentId);
       done(checkout.method);
     } catch (err) {
@@ -146,6 +186,27 @@ export const PaymentScreen: React.FC<{ navigation: any; route: any }> = ({
   return (
     <Screen bottomInset={spacing.xxl}>
       <TopBar title="Payment" onBack={navigation.goBack} />
+
+      {/*
+        The gateway's own sheet, opened only once the server has created a real
+        order with it. Cancelling closes it and charges nothing.
+      */}
+      {gateway ? (
+        <GatewayCheckout
+          checkout={gateway}
+          description={testName ?? 'Health Buddy order'}
+          prefill={{
+            ...(user?.fullName ? { name: user.fullName } : {}),
+            ...(user?.phoneNumber ? { contact: user.phoneNumber } : {}),
+          }}
+          onSuccess={(result) => void settleWithGateway(result)}
+          onCancel={(reason) => {
+            setGateway(null);
+            setPaying(false);
+            if (reason) Alert.alert('Payment not completed', reason);
+          }}
+        />
+      ) : null}
 
       <Text variant="captionSm" color={colors.captionGray}>
         Amount to pay

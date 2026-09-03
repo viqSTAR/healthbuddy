@@ -10,6 +10,7 @@ import {
   colors,
   errorMessage,
   fetchDoctors,
+  fetchMyEmergencyHistory,
   Icon,
   radius,
   Screen,
@@ -40,6 +41,7 @@ export const EmergencySosScreen: React.FC<{ navigation: any }> = ({ navigation }
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const doctors = useAsync(() => fetchDoctors(), []);
+  const history = useAsync(() => fetchMyEmergencyHistory(), []);
 
   const resolvePosition = useCallback(async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -84,7 +86,16 @@ export const EmergencySosScreen: React.FC<{ navigation: any }> = ({ navigation }
       ]
     );
 
-  const call = () => Linking.openURL(`tel:${CONTROL_NUMBER}`);
+  /**
+   * An iPad has no dialer, so `tel:` rejects rather than opening one. Left
+   * unhandled that is an unhandled promise rejection on the emergency screen —
+   * the number itself is on screen above, so the useful thing is to say so and
+   * let them dial it, not to fail silently.
+   */
+  const call = () =>
+    Linking.openURL(`tel:${CONTROL_NUMBER}`).catch(() =>
+      Alert.alert('Cannot place the call', `Dial ${CONTROL_NUMBER} from a phone.`)
+    );
 
   return (
     <Screen padded={false} bottomInset={spacing.xxl}>
@@ -159,6 +170,46 @@ export const EmergencySosScreen: React.FC<{ navigation: any }> = ({ navigation }
           latitude={coords?.latitude}
           longitude={coords?.longitude}
         />
+
+        {/*
+          Past alerts.
+
+          `fetchMyEmergencyHistory` existed with nothing calling it, so a patient
+          could raise an SOS and then had no record that they had — which matters
+          twice over: for their own account of what happened, and because an
+          alert still showing as unresolved is something they may need to chase.
+
+          Deliberately below the directory. Someone opening this screen in an
+          emergency needs the call button, not their history.
+        */}
+        {(history.data ?? []).length > 0 ? (
+          <View style={styles.doctorList}>
+            <SectionHeader title="Your past alerts" />
+            {(history.data ?? []).slice(0, 5).map((sos: EmergencySOS) => (
+              <Card key={sos.id} padding={spacing.insetCard} style={styles.doctorRow}>
+                <Icon
+                  name={sos.status === 'RESOLVED' ? 'check_circle' : 'emergency'}
+                  size={20}
+                  color={sos.status === 'RESOLVED' ? colors.successDark : colors.error}
+                />
+                <View style={styles.flex}>
+                  <Text variant="labelMd" color={colors.onSurface}>
+                    {new Date(sos.createdAt).toLocaleString()}
+                  </Text>
+                  <Text variant="captionSm" color={colors.captionGray}>
+                    {sos.ambulanceControlContact
+                      ? `Control room ${sos.ambulanceControlContact}`
+                      : 'Location shared with the dispatch team'}
+                  </Text>
+                </View>
+                <Badge
+                  label={sos.status.replace('_', ' ')}
+                  tint={sos.status === 'RESOLVED' ? 'success' : 'danger'}
+                />
+              </Card>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.doctorList}>
           <SectionHeader title="Doctors Nearby" />

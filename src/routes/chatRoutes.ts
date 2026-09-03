@@ -59,7 +59,11 @@ router.get(
   validate({ params: z.object({ id: uuidSchema }) }),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { party } = await partyFor(req);
-    const thread = await getThreadService((req.params as { id: string }).id, party);
+    const q = req.query as { page?: unknown; limit?: unknown };
+    const thread = await getThreadService((req.params as { id: string }).id, party, {
+      ...(q.page !== undefined ? { page: Number(q.page) } : {}),
+      ...(q.limit !== undefined ? { limit: Number(q.limit) } : {}),
+    });
     res.status(200).json({ success: true, thread });
   })
 );

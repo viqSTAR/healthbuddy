@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import {
   fetchPharmacies,
@@ -528,13 +529,23 @@ export const Pharmacies: React.FC = () => {
                     <th className="num">Radius</th>
                     <th>Payouts</th>
                     <th>State</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
                   {data.pharmacies.map((p) => (
                     <tr key={p.id} onClick={() => setOpenId(p.id)} style={{ cursor: 'pointer' }}>
                       <td>
-                        <button className="link-btn">{p.name}</button>
+                        {/* The row still opens the drawer for a quick toggle;
+                            the name goes to the shop's own page, where its
+                            shelf and ledger live. */}
+                        <Link
+                          to={`/pharmacies/${p.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="link-btn"
+                        >
+                          {p.name}
+                        </Link>
                         <span className="sub">
                           {[p.city, p.pincode].filter(Boolean).join(' · ') || p.address}
                         </span>

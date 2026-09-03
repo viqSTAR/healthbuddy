@@ -130,10 +130,24 @@ export const loginOnce = (phone: string): Promise<Session> => {
   return pending;
 };
 
-/** Removes every user created by this run, cascading to their profiles. */
+/**
+ * Removes every user created by this run, cascading to their profiles.
+ *
+ * Matched on the run's phone prefix, *plus* any anonymised account.
+ *
+ * An erased account no longer carries the prefix — that is the whole point of
+ * erasure, its phone number is replaced with an opaque placeholder — so the
+ * prefix alone stopped finding accounts the closure tests had closed. They then
+ * sat in the database still holding appointments against this run's doctor,
+ * and deleting that doctor failed on the RESTRICT constraint. Anonymised rows
+ * only exist here because a test made them: the suite runs one file at a time,
+ * so there is no other run's erasure to step on.
+ */
 export const cleanupTestUsers = async () => {
   const users = await prisma.user.findMany({
-    where: { phoneNumber: { startsWith: `+1999${RUN_ID}` } },
+    where: {
+      OR: [{ phoneNumber: { startsWith: `+1999${RUN_ID}` } }, { anonymisedAt: { not: null } }],
+    },
     select: { id: true, patient: { select: { id: true } }, doctor: { select: { id: true } } },
   });
   const userIds = users.map((u) => u.id);
@@ -160,14 +174,25 @@ export const cleanupTestUsers = async () => {
   // Any message left in a thread these tests did not own.
   await prisma.chatMessage.deleteMany({ where: { senderUserId: { in: userIds } } });
 
-  if (patientIds.length) {
+  if (patientIds.length || doctorIds.length) {
+    /**
+     * By patient OR by doctor.
+     *
+     * Both ends hold a RESTRICT reference, so an appointment blocks the removal
+     * of either party. Sweeping only the patient side left this run's doctor
+     * pinned by consultations whose patient had since been erased.
+     */
+    const consultations = {
+      OR: [{ patientId: { in: patientIds } }, { doctorId: { in: doctorIds } }],
+    };
+
     // Free any slots these tests booked so reruns aren't starved.
     const appts = await prisma.appointment.findMany({
-      where: { patientId: { in: patientIds } },
+      where: consultations,
       select: { slotId: true },
     });
-    await prisma.prescription.deleteMany({ where: { patientId: { in: patientIds } } });
-    await prisma.appointment.deleteMany({ where: { patientId: { in: patientIds } } });
+    await prisma.prescription.deleteMany({ where: consultations });
+    await prisma.appointment.deleteMany({ where: consultations });
     await prisma.doctorSlot.updateMany({
       where: { id: { in: appts.map((a) => a.slotId) } },
       data: { status: 'AVAILABLE' },

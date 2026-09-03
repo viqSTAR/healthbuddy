@@ -18,6 +18,22 @@ import {
   type AuthenticatedRequest,
 } from '../middlewares/auth.js';
 
+/**
+ * Optional `?page=&limit=` off the query string.
+ *
+ * Every one of these endpoints answers safely with no parameters at all — the
+ * service clamps to a default window — so existing clients keep working
+ * unchanged and only a client that wants a second page has to ask for one.
+ */
+const pageOf = (req: AuthenticatedRequest) => {
+  const q = req.query as { page?: unknown; limit?: unknown };
+  return {
+    ...(q.page !== undefined ? { page: Number(q.page) } : {}),
+    ...(q.limit !== undefined ? { limit: Number(q.limit) } : {}),
+  };
+};
+
+
 export const getMedicinesHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { category, query, page, limit, pincode } = req.query as unknown as {
     category?: string;
@@ -39,7 +55,7 @@ export const placeOrderHandler = asyncHandler(async (req: AuthenticatedRequest, 
 });
 
 export const getPatientOrdersHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const orders = await getPatientMedicineOrdersService(requirePatientId(req));
+  const orders = await getPatientMedicineOrdersService(requirePatientId(req), pageOf(req));
   res.status(200).json({ success: true, count: orders.length, orders });
 });
 

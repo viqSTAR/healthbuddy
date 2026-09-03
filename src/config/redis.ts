@@ -1,6 +1,7 @@
 import { Redis } from 'ioredis';
 import { env, isProduction } from './env.js';
 import { logger } from '../utils/logger.js';
+import { AppError } from '../utils/AppError.js';
 
 let redisClient: Redis | null = null;
 
@@ -63,6 +64,22 @@ export const getRedisClient = (): Redis | null => {
   }
 };
 
+/**
+ * The live client, or null when the process must use the local fallback.
+ *
+ * In production it does not return null — it throws. The fallback exists so a
+ * developer can work without Redis running; reaching it in production means
+ * OTPs are being written to one replica's memory and verified against another's,
+ * and every rate limit is silently divided among however many instances are
+ * running. Both fail *open*: the OTP path breaks visibly, but the rate limits
+ * quietly multiply an attacker's budget by the size of the fleet, which is the
+ * kind of degradation nobody notices until it is used.
+ *
+ * `assertDistributedStore` already refuses to *start* in this state. This is the
+ * same rule applied for the rest of the process's life, because Redis going away
+ * an hour after boot is the ordinary case and boot-time checks say nothing
+ * about it.
+ */
 const liveClient = (): Redis | null => {
   const client = getRedisClient();
   if (client && client.status === 'ready') return client;
@@ -74,7 +91,20 @@ const liveClient = (): Redis | null => {
         'OTPs, rate limits and slot locks will NOT work across multiple instances.'
     );
   }
+
+  if (isProduction) {
+    throw new AppError(
+      'A required service is temporarily unavailable. Please try again shortly.',
+      503
+    );
+  }
   return null;
+};
+
+/** Whether a real distributed store is answering right now. For readiness checks. */
+export const isStoreReady = (): boolean => {
+  const client = getRedisClient();
+  return Boolean(client && client.status === 'ready');
 };
 
 /** Throws if a production process is running without a real distributed store. */

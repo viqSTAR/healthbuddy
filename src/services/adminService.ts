@@ -2,6 +2,7 @@ import type { Role } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { AppError, notFound } from '../utils/AppError.js';
 import { recordAudit } from './auditService.js';
+import { revokeSessions, invalidateAuthState } from './sessionService.js';
 
 const startOfToday = () => {
   const d = new Date();
@@ -75,6 +76,7 @@ export const listUsersService = async (role?: string, page = 1, limit = 20) => {
         role: true,
         isVerified: true,
         isSuspended: true,
+        anonymisedAt: true,
         createdAt: true,
         patient: { select: { fullName: true } },
         doctor: { select: { name: true, specialty: true } },
@@ -127,6 +129,21 @@ export const setUserSuspendedService = async (params: {
       prisma.pharmacy.updateMany({ where: { userId: user.id }, data: { isActive: false } }),
       prisma.labPartner.updateMany({ where: { userId: user.id }, data: { isActive: false } }),
     ]);
+
+    /**
+     * Throw them out of the sessions they are already in.
+     *
+     * Setting the column is not enough on its own: whoever is suspended is very
+     * often holding a live access token at that moment, and the reason someone
+     * is being suspended is usually that what they are doing right now needs to
+     * stop. Raising the token version ends it mid-session rather than in
+     * fifteen minutes.
+     */
+    await revokeSessions(user.id);
+  } else {
+    // Restoring does not need a revocation, but the cached "suspended" answer
+    // has to go or they stay locked out for the length of the TTL.
+    await invalidateAuthState(user.id);
   }
 
   await recordAudit({

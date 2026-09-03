@@ -11,14 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The three typecheck gates that already existed locally and had nothing
-  # running them automatically.
-  #
-  # The test suite is deliberately not here: it runs against a real PostgreSQL
-  # and Redis rather than fakes, so it needs a live DATABASE_URL. Wiring it in
-  # means either a service container plus `prisma db push` and a seed, or a
-  # dedicated CI database — worth doing, but it is a separate change and a
-  # half-configured test job that always fails is worse than no test job.
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -40,9 +32,84 @@ jobs:
         run: |
           npm ci
           npm run typecheck
+          npm test
 
       - name: Mobile apps
         working-directory: mobile
         run: |
           npm ci
           npm run typecheck
+          npm test
+
+  # The suite runs against a real PostgreSQL and a real Redis rather than fakes,
+  # which is the reason it was not here before. Service containers make that a
+  # configuration problem rather than a design one — and the alternative,
+  # trusting that somebody runs `npm test` locally before pushing, is how the
+  # security suite quietly stops being true.
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: healthbuddy_test
+        ports:
+          - 5432:5432
+        # Without a health check the job races the database's startup and the
+        # first migration fails on a connection refused.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/healthbuddy_test?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/healthbuddy_test?schema=public
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      # Generated per run and thrown away. Real values live in the deployment's
+      # own configuration; nothing here should ever be a secret worth having.
+      JWT_ACCESS_SECRET: ci_access_secret_that_is_long_enough_for_the_check_0123456789
+      JWT_REFRESH_SECRET: ci_refresh_secret_that_is_long_enough_for_the_check_0123456789
+      # tests/testEnv.mjs pins NODE_ENV, EXPOSE_DEV_OTP, SMS_PROVIDER and the
+      # storage driver before any application module loads. They are not
+      # repeated here on purpose — two places to change is one place to forget.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Apply migrations
+        # `migrate deploy` rather than `db push`: this is the same command that
+        # runs against production, so a migration that cannot apply cleanly to
+        # an empty database fails here rather than during a deploy.
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Seed the catalogue
+        # Several suites act as the seeded pharmacy, lab and doctor accounts.
+        run: npm run seed
+
+      - name: Test
+        run: npm test

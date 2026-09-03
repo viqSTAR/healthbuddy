@@ -104,6 +104,7 @@ export const SignUpScreen: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               }}
               keyboardType="phone-pad"
               autoComplete="tel"
+              textContentType="telephoneNumber"
               error={errors.phone}
               hint={errors.phone ? undefined : "We'll text you a one-time code."}
             />

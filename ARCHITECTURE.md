@@ -361,6 +361,37 @@ picks a form and a dashboard and is never consulted for authorisation. Only
 `User.role`. This is the boundary that the original privilege-escalation bug
 broke, and it has six regression tests guarding it.
 
+### Sessions can be ended
+
+A JWT is a bearer credential the server keeps no copy of, so nothing about
+holding one proves the account behind it is still allowed to hold a session.
+That gap used to be total: suspending an account set a column no authentication
+path read, so a suspended user could sign in fresh and keep refreshing for a
+week; signing out cleared a browser cookie and, on mobile, revoked nothing.
+
+`User.tokenVersion` closes it. Every token carries the version it was minted
+under, `authenticateJwt` compares it against the live value on each request, and
+raising the column by one ends every session the account holds — on every
+device, immediately. Suspension, sign-out, role change and erasure all raise it.
+The lookup is cached for thirty seconds and every path that changes the value
+invalidates the cache, so the TTL is a backstop rather than a delay.
+
+See `services/sessionService.ts`; `tests/session.test.ts` holds the regressions.
+
+### Erasure without destroying the medical record
+
+A patient can ask for their data to be erased, and a prescription is a medical
+record with its own retention period. Both are true, so `DELETE` was never the
+answer — and was not even possible, since `Appointment` and `Prescription` hold
+`RESTRICT` references to the patient.
+
+`userLifecycleService` empties the identity and keeps the record: name, contact
+details, saved addresses, devices, notifications and personal documents are
+destroyed, the phone number is released, and the clinical and financial rows
+survive attached to a subject with no personal data in it. It refuses while work
+is in flight, and refuses for provider accounts, whose licence numbers sit on
+records other people rely on.
+
 ---
 
 ## 9. Build status by capability
@@ -370,6 +401,10 @@ broke, and it has six regression tests guarding it.
 | Capability | Where |
 | --- | --- |
 | Phone + OTP auth, typed JWTs, refresh re-reads role | `src/services/authService.ts` |
+| Revocable sessions: suspend, sign-out and role change end live tokens | `sessionService.ts` |
+| Account erasure that keeps the medical record, and data export | `userLifecycleService.ts` |
+| Uploads validated against their bytes, not their declared type | `utils/fileType.ts` |
+| Purpose-scoped key derivation from one configured secret | `utils/secrets.ts` |
 | Provider self-registration → admin verification → role grant | `applicationService.ts` |
 | Private document storage, authorised per request | `documentService.ts`, `utils/storage.ts` |
 | Doctor availability, slot generation | `doctorService.ts` |
@@ -381,10 +416,16 @@ broke, and it has six regression tests guarding it.
 | Licence expiry tracking + auto-suspension | `applicationService.ts` |
 | Admin panel: people, operations, money, catalogue, governance | `admin/src/pages/`, `adminOpsService.ts` |
 | Prescription → order with patient consent | `fulfilmentService.ts` |
+| Per-purpose, versioned consent records with withdrawal | `consentService.ts` |
+| Retention sweep — deletes short-lived data, reports the rest | `retentionService.ts` |
+| Bounded list reads, so a long history cannot grow a response without limit | `utils/pagination.ts` |
+| Fault reporting behind a provider interface, ids only | `utils/errorReporter.ts` |
 | Image-based consultation | `documentService.ts` |
 | Condition-matched health notifications | `healthContentService.ts` |
 | Emergency services directory (public) | `emergencyDirectoryService.ts` |
 | Checkout, split settlement, refunds, COD | `paymentService.ts`, `payment/provider.ts` |
+| Gateway checkout in the app, signature verified server-side | `ui/GatewayCheckout.tsx`, `confirmPayment` |
+| Patient: cancel a consultation, payments, health guidance, SOS history, help | `apps/patient/src/screens/patient/` |
 | Object storage on R2 / S3 | `utils/storage.ts` |
 | Video room minting + join authorisation | `videoService.ts` |
 | Stock ledger, reservations, expiry control | `stockService.ts` |
@@ -470,12 +511,10 @@ payment-aggregator authorisation.
 
 | Gap | Impact |
 | --- | --- |
-| Prisma **migrations** (currently `db push`) | No rollback path on a live database |
-| **CI** | Nothing runs the 59 tests automatically |
-| **Error tracking** (Sentry) | You would learn about failures from users |
-| **Pagination** on ~33 list queries | `getDoctorAppointments` returns every appointment ever |
-| **Frontend tests** | 0 across 90 app source files |
-| **DPDP compliance**: consent records, retention policy, data export/delete | Legal requirement, not a feature |
+| **Frontend tests** beyond the session layer — screens and RN components have none | A regression in a screen is caught by a person, not by CI. The API clients, the panel's destructive-action guards and the mobile token store are covered (46 tests) |
+| **DPDP**: a lawyer's review, a named DPO, a breach runbook, and processor agreements | Legal requirement, not a feature. Consent records, export, erasure and the retention sweep are implemented — see [DATA-POLICY.md](DATA-POLICY.md) |
+| **A scheduler** pointed at `npm run retention -- --apply` | The sweep exists and is tested; nothing runs it nightly yet |
+| **Load testing** | No idea what breaks first under concurrency, or where |
 | i18n | English-only limits reach sharply in India |
 
 ---
@@ -514,12 +553,14 @@ then the admin panel dispatches and the patient dials directly.
 3. **Onboard each partner as a linked account** — until a partner has a
    `payoutAccountId`, their share is recorded as owed but stays in the platform's
    settlement rather than being split out
-4. **Migrations + CI + Sentry** — roughly a day, and it makes everything else safe to change
+4. ~~Migrations~~ · ~~CI~~ — **done**. `prisma/migrations` holds a verified
+   baseline and CI runs the full suite against a real Postgres and Redis.
+   **Sentry** is what remains here
 5. **Pagination** — before onboarding beyond a handful of providers
 6. Rider app → ambulance app → i18n
 
-Launching without 2 and 4 means a platform that cannot take money and cannot
-tell you when it breaks.
+Launching without 2 means a platform that cannot take money; without Sentry, one
+that cannot tell you when it breaks.
 
 ---
 
@@ -561,20 +602,54 @@ silently and expensively rather than loudly.
 
 ### Before the first real user
 
-- **Prisma migrations**, not `db push`. There is no rollback from `db push` on a
-  database with real records in it
-- **Sentry or equivalent**, or you find out about failures from patients
-- **`npm run storage:check`** against the production bucket
-- A **restore test**: take a backup, restore it somewhere, confirm it works.
-  An untested backup is a hope, not a backup
-- Confirm the R2 bucket is still private — `storage:check` covers this
+One command answers most of this. `npm run preflight` connects to the database
+and checks migrations are applied, round-trips a file through the storage
+driver, verifies Redis read-after-write, and reports on SMS, payments, video and
+error reporting. It exits non-zero on anything that would block production, so
+it can gate a deploy.
+
+```bash
+npm run preflight        # every dependency, actually exercised
+npm run storage:check    # deeper: also proves the bucket is not public
+npm run restore:drill    # dump, restore, compare row counts
+```
+
+Then, by hand:
+
 - **Set `TZ=Asia/Kolkata`** on the server. Slot times are stored as local
   `HH:mm`, so a server on UTC opens a 10:00 consultation at the wrong hour
+- **Install the scheduled jobs** — [deploy/README.md](deploy/README.md) has
+  cron, systemd and Kubernetes forms. The retention sweep is the one that
+  matters; without it the real retention period for everything is "forever"
+- **One real payment, end to end.** The gateway checkout is implemented and
+  verified server-side, but it has never run against a live Razorpay account.
+  Put ₹1 through it before a patient does
+- **Re-run the load test against staging** with Redis attached — see
+  [PERFORMANCE.md](PERFORMANCE.md). Compare the shape, not the numbers
 
 ### Regulatory, before taking money or prescribing
 
-- Razorpay Route live mode, with each partner onboarded as a linked account
-- Retention and deletion policy under the DPDP Act, plus a way for a patient to
-  export and delete their record
-- The video provider's data-processing terms — `meet.jit.si` is not an
-  appropriate host for clinical calls at any real volume
+Implemented, and needing only configuration:
+
+- Consent recorded per purpose and versioned, data export, and erasure that
+  keeps the medical record — see [DATA-POLICY.md](DATA-POLICY.md)
+- A retention sweep that enforces the documented periods
+- A breach-response runbook — [INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)
+
+**Needing a person, not a commit.** These are the actual gate:
+
+- [ ] **A lawyer's review** of DATA-POLICY.md and the customer-facing privacy
+      notice, against the DPDP Act and the Telemedicine Practice Guidelines
+- [ ] **A named Data Protection Officer**, published, with a contact route for
+      rights requests. The slot is INCIDENT-RESPONSE.md §0
+- [ ] **A named incident lead**, and agreement on who may take the platform
+      offline without asking anyone
+- [ ] **Data-processing agreements** with every processor actually used: SMS,
+      payment aggregator, object storage, push notifications, error tracking
+- [ ] **Razorpay Route live mode**, with each partner onboarded as a linked
+      account — until a partner has a `payoutAccountId` their share is recorded
+      as owed but stays in the platform's settlement
+- [ ] **The video provider's data-processing terms.** `meet.jit.si` is not an
+      appropriate host for clinical calls at any real volume
+
+Nothing in the codebase blocks launch. Everything in that list does.

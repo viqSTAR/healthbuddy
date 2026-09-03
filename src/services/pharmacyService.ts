@@ -5,6 +5,7 @@ import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { notify } from './notificationService.js';
 import { refundForTargetService } from './paymentService.js';
 import { consumeReservedStock, releaseReservedStock } from './stockService.js';
+import { windowFor, type PageRequest } from '../utils/pagination.js';
 
 /**
  * The catalogue, optionally narrowed to one pincode.
@@ -494,10 +495,16 @@ export const deriveOrderStatus = (
  * so a list cannot show "Delivered" while a shipment is still out — the two
  * would drift the moment one shop moved and another did not.
  */
-export const getPatientMedicineOrdersService = async (patientId: string) => {
+export const getPatientMedicineOrdersService = async (
+  patientId: string,
+  page?: PageRequest
+) => {
+  const w = windowFor(page);
   const orders = await prisma.medicineOrder.findMany({
     where: { patientId },
     orderBy: { createdAt: 'desc' },
+    take: w.take,
+    skip: w.skip,
     include: { shipments: shipmentView },
   });
 

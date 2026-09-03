@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { Prisma } from '@prisma/client';
 import { MulterError } from 'multer';
 import { logger } from '../utils/logger.js';
+import { errorReporter } from '../utils/errorReporter.js';
 import { AppError } from '../utils/AppError.js';
 import { isProduction, env } from '../config/env.js';
 
@@ -52,6 +53,22 @@ export const errorHandler = (err: any, req: Request, res: Response, _next: NextF
   const context = `${req.method} ${req.originalUrl}`;
   if (status >= 500) {
     logger.error(`[${status}] ${context} — ${err?.message}`, err?.stack ?? '');
+
+    /**
+     * Only 5xx is reported. A 404 or a failed validation is the system working;
+     * shipping those to an error tracker buries the ones that are not, and
+     * every alert that is usually noise is an alert nobody reads.
+     *
+     * `req.route?.path` rather than `originalUrl`: the pattern, not the
+     * instance, so ids stay out of it and faults on the same endpoint group
+     * together instead of appearing as thousands of distinct problems.
+     */
+    errorReporter.capture(err, {
+      route: `${req.method} ${req.route?.path ?? req.path}`,
+      ...((req as { user?: { userId?: string } }).user?.userId
+        ? { userId: (req as { user?: { userId?: string } }).user!.userId! }
+        : {}),
+    });
   } else {
     logger.warn(`[${status}] ${context} — ${message}`);
   }

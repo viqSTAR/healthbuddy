@@ -10,7 +10,9 @@
     "web": "expo start --web --port 8082",
     "start:clear": "expo start --clear --port 8082",
     "typecheck": "tsc --noEmit",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "ios:simulator": "expo run:ios",
+    "prebuild": "expo prebuild --clean"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

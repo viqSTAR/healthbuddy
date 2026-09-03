@@ -59,6 +59,9 @@ export const Input: React.FC<InputProps> = ({
           style={styles.input}
           placeholderTextColor={colors.captionGray}
           secureTextEntry={hidden}
+          // The field is a fixed 52pt tall; at the top of the iOS text-size
+          // range an unbounded multiplier clips what is being typed.
+          maxFontSizeMultiplier={1.3}
           onFocus={(e) => {
             setFocused(true);
             rest.onFocus?.(e);

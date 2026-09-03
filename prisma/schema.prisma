@@ -14,11 +14,11 @@
 //     Lab reports and prescriptions are health data; access is authorised per
 //     request and served through short-lived signed links.
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   /// Pooled endpoint (PgBouncer). Serverless Postgres suspends idle compute and
   /// drops direct connections, which surfaces as a stream of "connection
   /// forcibly closed" errors; the pooler absorbs that.
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
   /// Unpooled. Schema changes are DDL, which PgBouncer's transaction mode
   /// cannot run, so the CLI needs a direct connection. Falls back to
   /// DATABASE_URL when unset, which is correct for a non-pooled host.
@@ -165,6 +165,26 @@ enum AppId {
   /// Riders and sample collectors.
   AGENT
   ADMIN
+}
+
+/// What a person has agreed to, kept separately from whether they agreed.
+///
+/// Consent under the DPDP Act is per *purpose*, and the purposes have to be
+/// separable: someone may be perfectly willing to be treated and unwilling to
+/// be marketed at, and a single "I agree" that bundles both is not consent to
+/// either. Withdrawing one must not withdraw the others.
+enum ConsentPurpose {
+  /// The terms of use. Required to hold an account.
+  TERMS_OF_SERVICE
+  /// Processing personal and health data to provide care. Required — without
+  /// it there is no lawful basis to hold a medical record at all.
+  PRIVACY_POLICY
+  /// Being treated over video or chat rather than in person. The telemedicine
+  /// guidelines make this the patient's explicit decision, per episode of care.
+  TELECONSULTATION
+  /// Health tips, reminders and offers. Optional, and refusing it changes
+  /// nothing about the care available.
+  MARKETING_MESSAGES
 }
 
 // ---------------------------------------------------------------------------
@@ -331,13 +351,30 @@ enum EmergencyServiceType {
 // ---------------------------------------------------------------------------
 
 model User {
-  id          String   @id @default(uuid())
-  phoneNumber String   @unique
-  role        Role     @default(PATIENT)
-  isVerified  Boolean  @default(true)
-  isSuspended Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String  @id @default(uuid())
+  phoneNumber String  @unique
+  role        Role    @default(PATIENT)
+  isVerified  Boolean @default(true)
+  isSuspended Boolean @default(false)
+
+  /// Invalidates every token issued before it was last raised.
+  ///
+  /// A JWT is a bearer credential the server does not store, so on its own
+  /// nothing can take one back: suspending an account, signing out, or
+  /// discovering a stolen phone left the existing tokens working until they
+  /// expired on their own — up to seven days for a refresh token. Every signed
+  /// token carries the version it was minted under, and a request whose version
+  /// is behind the account's is refused. Raising this by one is what "end every
+  /// session for this person, now" means.
+  tokenVersion Int @default(0)
+
+  /// Set when the account has been erased on request. See userLifecycleService:
+  /// the row survives because clinical records point at it, but the personal
+  /// data in it is gone and the account can never be signed into again.
+  anonymisedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   patient    Patient?
   doctor     Doctor?
@@ -355,6 +392,7 @@ model User {
   assignedShipments    Shipment[]            @relation("ShipmentAgent")
   chatMessages         ChatMessage[]         @relation("ChatSender")
   assignedLabOrders    LabOrder[]            @relation("LabOrderAgent")
+  consents             ConsentRecord[]
 
   @@index([phoneNumber])
   @@index([role])
@@ -414,12 +452,12 @@ model Address {
   receiverPhone String?
 
   /// Free-text house/flat and street, as the patient typed or the map returned.
-  line1     String
-  line2     String?
-  city      String?
-  state     String?
-  pincode   String
-  landmark  String?
+  line1    String
+  line2    String?
+  city     String?
+  state    String?
+  pincode  String
+  landmark String?
 
   /// Present when the address came from the device's location rather than being
   /// typed. Used to pick the nearest stocking pharmacy.
@@ -476,11 +514,11 @@ model Doctor {
   /// Where the clinic physically is. Only in-person visits use this — a video
   /// consultation reaches anywhere, so filtering the whole doctor list by
   /// location would hide doctors who could perfectly well take the patient.
-  clinicCity      String?
-  clinicState     String?
-  clinicPincode   String?
-  latitude        Float?
-  longitude       Float?
+  clinicCity    String?
+  clinicState   String?
+  clinicPincode String?
+  latitude      Float?
+  longitude     Float?
 
   /// Letterhead: the parts of a printed prescription the doctor owns.
   ///
@@ -594,8 +632,8 @@ model LabPartner {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  labOrders LabOrder[]
-  offerings LabOffering[]
+  labOrders  LabOrder[]
+  offerings  LabOffering[]
   collectors DeliveryAgent[]
 
   @@index([isActive])
@@ -622,7 +660,7 @@ model DeliveryAgent {
   labPartnerId String?
   labPartner   LabPartner? @relation(fields: [labPartnerId], references: [id], onDelete: SetNull)
 
-  isActive Boolean @default(true)
+  isActive    Boolean   @default(true)
   /// On shift. A rider who has finished for the day stops being offered work,
   /// which is a different thing from being suspended.
   isAvailable Boolean   @default(false)
@@ -643,11 +681,11 @@ model DeliveryAgent {
 /// pharmacy's service area is: a straight-line distance says nothing about
 /// whether someone is willing to make the trip.
 model DeliveryAgentArea {
-  id      String        @id @default(uuid())
-  agentId String
-  agent   DeliveryAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  pincode String
-  createdAt DateTime @default(now())
+  id        String        @id @default(uuid())
+  agentId   String
+  agent     DeliveryAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  pincode   String
+  createdAt DateTime      @default(now())
 
   @@unique([agentId, pincode])
   @@index([pincode])
@@ -720,6 +758,9 @@ model ProviderApplication {
   @@unique([userId, type])
   @@index([status, type])
   @@index([submittedAt])
+  /// Postgres does not index a foreign key on its own, and every delete of a
+  /// reviewer has to scan this table to check the constraint.
+  @@index([reviewedByUserId])
 }
 
 /// An uploaded file. `storageKey` is an opaque key into the storage driver, not
@@ -773,20 +814,20 @@ model DoctorSlot {
 }
 
 model Appointment {
-  id            String            @id @default(uuid())
-  patientId     String
-  patient       Patient           @relation(fields: [patientId], references: [id])
-  doctorId      String
-  doctor        Doctor            @relation(fields: [doctorId], references: [id])
-  slotId        String            @unique
-  slot          DoctorSlot        @relation(fields: [slotId], references: [id])
-  type          AppointmentType   @default(VIDEO)
-  status        AppointmentStatus @default(SCHEDULED)
-  symptoms      String?
+  id              String            @id @default(uuid())
+  patientId       String
+  patient         Patient           @relation(fields: [patientId], references: [id])
+  doctorId        String
+  doctor          Doctor            @relation(fields: [doctorId], references: [id])
+  slotId          String            @unique
+  slot            DoctorSlot        @relation(fields: [slotId], references: [id])
+  type            AppointmentType   @default(VIDEO)
+  status          AppointmentStatus @default(SCHEDULED)
+  symptoms        String?
   /// Unguessable room identifier, minted on first join. A room name is a bearer
   /// credential on most hosted video services — anyone who can guess it walks
   /// into the consultation — so it is random, never derived from the id.
-  meetingRoomId String?
+  meetingRoomId   String?
   /// Which provider minted `meetingRoomId`, so a room is never reinterpreted
   /// against a different service after a config change.
   meetingProvider String?
@@ -985,7 +1026,7 @@ model PharmacyInventory {
   pharmacy     Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
   medicineId   String
   medicine     Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
-  price        Decimal @db.Decimal(12, 2)
+  price        Decimal  @db.Decimal(12, 2)
   /// Physically on the shelf. Maintained by StockMovement — never edited
   /// directly, so every change has a reason attached to it.
   stock        Int      @default(0)
@@ -1001,7 +1042,7 @@ model PharmacyInventory {
   batchNumber String?
   expiryDate  DateTime?
 
-  updatedAt    DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 
   movements StockMovement[]
 
@@ -1053,8 +1094,8 @@ model MedicineOrder {
   pharmacyId  String?
   pharmacy    Pharmacy?   @relation(fields: [pharmacyId], references: [id])
   items       Json
-  totalAmount Decimal @db.Decimal(12, 2)
-  deliveryFee Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount Decimal     @db.Decimal(12, 2)
+  deliveryFee Decimal     @default(0) @db.Decimal(12, 2)
   status      OrderStatus @default(PLACED)
   address     String
   latitude    Float?
@@ -1075,18 +1116,18 @@ model MedicineOrder {
   /// pool — which made the dispatch board read every order as uncarried and let
   /// an operator press Assign on a field no rider app looked at. Who is
   /// carrying what lives on `Shipment.assignedAgentUserId`.
-  acceptedAt          DateTime?
-  dispatchedAt        DateTime?
-  deliveredAt         DateTime?
-  cancelReason        String?
+  acceptedAt   DateTime?
+  dispatchedAt DateTime?
+  deliveredAt  DateTime?
+  cancelReason String?
 
   /// The saved address this was sent to, when the patient picked one. The
   /// `address` string above stays the authoritative record of where the order
   /// actually went: a book entry can be edited or deleted afterwards, and an
   /// order must never silently change the address it was delivered to.
-  addressId String?
+  addressId  String?
   addressRef Address? @relation(fields: [addressId], references: [id], onDelete: SetNull)
-  pincode   String?
+  pincode    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1096,6 +1137,8 @@ model MedicineOrder {
 
   @@index([patientId])
   @@index([pharmacyId, status])
+  @@index([fulfilmentId])
+  @@index([addressId])
 }
 
 /// The part of an order one pharmacy is responsible for.
@@ -1189,23 +1232,23 @@ model ShipmentPlace {
 // ---------------------------------------------------------------------------
 
 model LabPackage {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   testName    String
   category    String
   /// National fallback, used when no LabTestPrice covers an area.
   price       Decimal @db.Decimal(12, 2)
   sampleType  String
-  fastingReq  Boolean  @default(false)
+  fastingReq  Boolean @default(false)
   description String?
 
   /// Defaults to a plain report: the common case, and the one that promises
   /// least. A test that produces films has to say so explicitly.
-  deliveryMode LabDeliveryMode @default(DIGITAL_REPORT)
+  deliveryMode   LabDeliveryMode @default(DIGITAL_REPORT)
   /// Whether a phlebotomist can collect at the patient's address, as opposed to
   /// the patient attending. An MRI cannot come to your house.
-  homeCollection Boolean @default(true)
+  homeCollection Boolean         @default(true)
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   offerings  LabOffering[]
   prices     LabTestPrice[]
@@ -1233,8 +1276,8 @@ model LabTestPrice {
   state             String     @default("")
   /// "" means any city within `state`.
   city              String     @default("")
-  price             Decimal @db.Decimal(12, 2)
-  homeCollectionFee Decimal      @default(0) @db.Decimal(12, 2)
+  price             Decimal    @db.Decimal(12, 2)
+  homeCollectionFee Decimal    @default(0) @db.Decimal(12, 2)
   isActive          Boolean    @default(true)
   note              String?
 
@@ -1273,25 +1316,25 @@ model LabOrder {
   labPartnerId String?
   labPartner   LabPartner?    @relation(fields: [labPartnerId], references: [id])
   testName     String
-  price        Decimal @db.Decimal(12, 2)
+  price        Decimal        @db.Decimal(12, 2)
   status       LabOrderStatus @default(BOOKED)
 
   /// Where the sample is collected from, or the report sent to. Snapshotted
   /// like a medicine order's — an address-book entry can be edited afterwards
   /// and a collection visit must record where it was actually sent.
-  address      String?
-  latitude     Float?
-  longitude    Float?
-  addressId    String?
-  addressRef   Address? @relation(fields: [addressId], references: [id], onDelete: SetNull)
-  pincode      String?
+  address    String?
+  latitude   Float?
+  longitude  Float?
+  addressId  String?
+  addressRef Address? @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  pincode    String?
 
   /// Copied from the package at booking time, so changing the catalogue later
   /// cannot rewrite what an existing order promised.
-  deliveryMode LabDeliveryMode @default(DIGITAL_REPORT)
+  deliveryMode   LabDeliveryMode @default(DIGITAL_REPORT)
   /// True when a phlebotomist is coming to the patient rather than the patient
   /// attending the lab. Requires an address.
-  homeCollection Boolean @default(false)
+  homeCollection Boolean         @default(false)
 
   /// Legacy plain-URL field, retained only for rows created before reports
   /// moved into authorised Document storage. New reports use `documents`.
@@ -1317,6 +1360,8 @@ model LabOrder {
   @@index([patientId])
   @@index([labPartnerId, status])
   @@index([assignedAgentUserId])
+  @@index([fulfilmentId])
+  @@index([addressId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1391,6 +1436,7 @@ model ChatMessage {
   createdAt DateTime @default(now())
 
   @@index([threadId, createdAt])
+  @@index([senderUserId])
 }
 
 model EmergencySOS {
@@ -1405,6 +1451,9 @@ model EmergencySOS {
   createdAt  DateTime        @default(now())
 
   @@index([status, createdAt])
+  /// "My emergency history" reads straight off this column; without an index it
+  /// is a sequential scan of every SOS the platform has ever recorded.
+  @@index([patientId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -1457,9 +1506,9 @@ model Payment {
   purpose     PaymentPurpose
   method      PaymentMethod  @default(UPI)
   /// What the payer is charged, inclusive of delivery and collection fees.
-  amount      Decimal @db.Decimal(12, 2)
+  amount      Decimal        @db.Decimal(12, 2)
   /// The platform's cut, already contained within `amount`.
-  platformFee Decimal          @default(0) @db.Decimal(12, 2)
+  platformFee Decimal        @default(0) @db.Decimal(12, 2)
   currency    String         @default("INR")
   status      PaymentStatus  @default(PENDING)
 
@@ -1470,21 +1519,21 @@ model Payment {
   gatewayTransferId String?
   failureReason     String?
 
-  paidAt         DateTime?
-  refundedAmount Decimal     @default(0) @db.Decimal(12, 2)
-  refundedAt     DateTime?
-  refundReason   String?
+  paidAt          DateTime?
+  refundedAmount  Decimal   @default(0) @db.Decimal(12, 2)
+  refundedAt      DateTime?
+  refundReason    String?
   gatewayRefundId String?
 
   /// Guards against a retried checkout creating a second charge for one order.
   idempotencyKey String? @unique
 
-  appointmentId   String?        @unique
-  appointment     Appointment?   @relation(fields: [appointmentId], references: [id])
-  medicineOrderId String?        @unique
-  medicineOrder   MedicineOrder? @relation(fields: [medicineOrderId], references: [id])
-  labOrderId      String?        @unique
-  labOrder        LabOrder?      @relation(fields: [labOrderId], references: [id])
+  appointmentId   String?                 @unique
+  appointment     Appointment?            @relation(fields: [appointmentId], references: [id])
+  medicineOrderId String?                 @unique
+  medicineOrder   MedicineOrder?          @relation(fields: [medicineOrderId], references: [id])
+  labOrderId      String?                 @unique
+  labOrder        LabOrder?               @relation(fields: [labOrderId], references: [id])
   /// Set when this pays for a whole approved prescription basket, which may
   /// cover a medicine order and several lab bookings at once.
   fulfilmentId    String?                 @unique
@@ -1509,20 +1558,20 @@ model Payment {
 /// RBI authorisation. Instead the licensed aggregator splits at settlement and
 /// this table records the arithmetic for statements and reconciliation.
 model PaymentSplit {
-  id        String      @id @default(uuid())
-  paymentId String
-  payment   Payment     @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  payeeType PayeeType
+  id                String      @id @default(uuid())
+  paymentId         String
+  payment           Payment     @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payeeType         PayeeType
   /// Pharmacy / LabPartner / Doctor id. Null for the platform's own leg.
-  payeeId   String?
+  payeeId           String?
   /// The payee's account at the aggregator, resolved when the split is built.
   /// Null means the partner has not finished payout onboarding yet.
-  payoutAccountId String?
-  amount    Decimal @db.Decimal(12, 2)
-  status    SplitStatus @default(PENDING)
+  payoutAccountId   String?
+  amount            Decimal     @db.Decimal(12, 2)
+  status            SplitStatus @default(PENDING)
   gatewayTransferId String?
-  settledAt DateTime?
-  createdAt DateTime    @default(now())
+  settledAt         DateTime?
+  createdAt         DateTime    @default(now())
 
   @@index([paymentId])
   @@index([payeeType, payeeId])
@@ -1532,15 +1581,15 @@ model PaymentSplit {
 /// A webhook the gateway has delivered. Recorded before it is acted on, so a
 /// redelivery (which gateways do routinely) cannot apply the same event twice.
 model PaymentWebhookEvent {
-  id         String   @id @default(uuid())
-  gateway    String
+  id          String    @id @default(uuid())
+  gateway     String
   /// The gateway's own event id, or a hash of the payload when it sends none.
-  eventId    String
-  eventType  String
-  payload    Json
+  eventId     String
+  eventType   String
+  payload     Json
   processedAt DateTime?
-  error      String?
-  createdAt  DateTime @default(now())
+  error       String?
+  createdAt   DateTime  @default(now())
 
   @@unique([gateway, eventId])
   @@index([processedAt])
@@ -1630,6 +1679,38 @@ model EmergencyService {
 /// Append-only record of privileged actions — role grants, application
 /// decisions, prescription issuance, report access. Required evidence for a
 /// system that carries prescriptions and health records.
+/// One consent decision, kept as a record rather than a flag.
+///
+/// A boolean on the user row cannot answer the questions that are actually
+/// asked: *when* did they agree, to *which version* of the policy, and did they
+/// ever take it back? Rows are never updated in place for that reason —
+/// withdrawing stamps `withdrawnAt` and granting again writes a new row, so the
+/// history reads forwards and cannot be quietly rewritten.
+model ConsentRecord {
+  id      String         @id @default(uuid())
+  userId  String
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose ConsentPurpose
+
+  /// Which text they saw. A policy that changes needs fresh consent, and
+  /// without this there is no way to know who agreed to what.
+  policyVersion String
+
+  grantedAt   DateTime  @default(now())
+  /// Set when withdrawn. Null means the consent still stands.
+  withdrawnAt DateTime?
+
+  /// Where the decision came from, for the same reason the audit log keeps one.
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  /// Reads ask "what is in force for this person right now", which is this
+  /// index with `withdrawnAt IS NULL`.
+  @@index([userId, purpose, withdrawnAt])
+  @@index([purpose, grantedAt])
+}
+
 model AuditLog {
   id          String   @id @default(uuid())
   actorUserId String?

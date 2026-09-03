@@ -22,6 +22,9 @@ import { Webhooks } from './pages/Webhooks';
 import { Catalogue } from './pages/Catalogue';
 import { Emergency } from './pages/Emergency';
 import { AuditLog } from './pages/AuditLog';
+import { Retention } from './pages/Retention';
+import { PharmacyDetail } from './pages/PharmacyDetail';
+import { DoctorDetail } from './pages/DoctorDetail';
 import { LabPricing } from './pages/LabPricing';
 import { StockLedger } from './pages/StockLedger';
 
@@ -124,7 +127,10 @@ const Sidebar: React.FC = () => {
     },
     {
       title: 'Governance',
-      items: [{ to: '/audit', label: 'Audit log' }],
+      items: [
+        { to: '/audit', label: 'Audit log' },
+        { to: '/retention', label: 'Retention' },
+      ],
     },
   ];
 
@@ -179,7 +185,9 @@ const Shell: React.FC = () => (
 
         <Route path="/patients" element={<Patients />} />
         <Route path="/doctors" element={<Doctors />} />
+        <Route path="/doctors/:id" element={<DoctorDetail />} />
         <Route path="/pharmacies" element={<Pharmacies />} />
+        <Route path="/pharmacies/:id" element={<PharmacyDetail />} />
         <Route path="/labs" element={<Labs />} />
         <Route path="/agents" element={<Agents />} />
         <Route path="/users" element={<Users />} />
@@ -197,6 +205,7 @@ const Shell: React.FC = () => (
         <Route path="/stock" element={<StockLedger />} />
 
         <Route path="/audit" element={<AuditLog />} />
+        <Route path="/retention" element={<Retention />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

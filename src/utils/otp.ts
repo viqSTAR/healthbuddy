@@ -1,5 +1,5 @@
 import { randomInt, createHmac, timingSafeEqual } from 'node:crypto';
-import { env } from '../config/env.js';
+import { OTP_KEY } from './secrets.js';
 
 export const OTP_LENGTH = 6;
 export const OTP_TTL_SECONDS = 300; // 5 minutes
@@ -14,11 +14,13 @@ export const generateOtp = (): string =>
 
 /**
  * OTPs are stored hashed so a Redis dump or read-only cache exposure cannot be
- * replayed into account takeover. Keyed with the access secret rather than a
- * bare digest, since a 6-digit space is trivially rainbow-tabled otherwise.
+ * replayed into account takeover. Keyed rather than a bare digest, since a
+ * 6-digit space is trivially rainbow-tabled otherwise — and keyed with a
+ * purpose-derived key rather than the token secret itself, so an OTP hash and a
+ * signed token can never be confused for one another. See utils/secrets.
  */
 export const hashOtp = (otp: string, phoneNumber: string): string =>
-  createHmac('sha256', env.JWT_ACCESS_SECRET).update(`${phoneNumber}:${otp}`).digest('hex');
+  createHmac('sha256', OTP_KEY).update(`${phoneNumber}:${otp}`).digest('hex');
 
 /** Constant-time compare so response latency cannot leak a correct prefix. */
 export const otpMatches = (candidate: string, phoneNumber: string, storedHash: string): boolean => {

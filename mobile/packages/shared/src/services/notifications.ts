@@ -84,8 +84,26 @@ export const registerForPushNotifications = async (appId: AppId): Promise<string
     });
   }
 
-  const id = projectId();
-  const { data: token } = await Notifications.getExpoPushTokenAsync(id ? { projectId: id } : {});
+  /**
+   * Minting the token is the step that can fail for reasons that are not the
+   * caller's problem.
+   *
+   * On the iOS Simulator there is no APNs registration to hand out, and this
+   * throws rather than returning nothing — the doc comment above already
+   * promised a null for that case, and the code did not deliver one, so every
+   * simulator login rejected out of `registerForPushNotifications` and took the
+   * rest of the sign-in callback with it. A missing EAS project id and a
+   * device that cannot reach Apple or Google fail the same way.
+   *
+   * Push is an enhancement. Failing to arrange it is not a failed login.
+   */
+  let token: string;
+  try {
+    const id = projectId();
+    ({ data: token } = await Notifications.getExpoPushTokenAsync(id ? { projectId: id } : {}));
+  } catch {
+    return null;
+  }
 
   await registerDevice({
     token,
@@ -94,6 +112,28 @@ export const registerForPushNotifications = async (appId: AppId): Promise<string
   });
 
   return token;
+};
+
+/**
+ * Points the springboard badge at what the server actually holds unread.
+ *
+ * iOS keeps whatever number the last push set until the app takes it down
+ * itself. Android's channel badge follows the shade, so nobody noticed this was
+ * never wired up — on an iPhone it means a red "3" sitting over an app whose
+ * feed you read yesterday, and after enough of those the badge stops meaning
+ * anything.
+ *
+ * Setting the count rather than clearing it keeps the two in step in both
+ * directions: read three of five and the badge says two.
+ */
+export const syncNotificationBadge = async (unread: number): Promise<void> => {
+  const Notifications = await loadNotifications();
+  if (!Notifications) return;
+  try {
+    await Notifications.setBadgeCountAsync(Math.max(0, Math.trunc(unread)));
+  } catch {
+    // A badge is decoration. Nothing here is worth surfacing to the user.
+  }
 };
 
 export const unregisterPushToken = (token: string) => unregisterDevice(token);

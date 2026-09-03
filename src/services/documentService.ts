@@ -1,18 +1,10 @@
 import type { DocumentKind, Prisma } from '@prisma/client';
 import { prisma } from '../config/db.js';
 import { storage, buildStorageKey, signDocumentLink } from '../utils/storage.js';
+import { assertDeclaredTypeMatchesBytes } from '../utils/fileType.js';
 import { AppError, notFound } from '../utils/AppError.js';
 import type { JwtPayload } from '../utils/jwt.js';
 import { recordAudit } from './auditService.js';
-
-/** Only formats we can safely render. Executables and archives are refused. */
-const ALLOWED_MIME = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'application/pdf',
-]);
 
 /**
  * Documents that are health data rather than business paperwork. These carry
@@ -36,12 +28,12 @@ export interface UploadInput {
 }
 
 export const uploadDocumentService = async (input: UploadInput) => {
-  if (!ALLOWED_MIME.has(input.mimeType)) {
-    throw new AppError(
-      `Unsupported file type "${input.mimeType}". Upload a JPEG, PNG, WebP or PDF.`,
-      415
-    );
-  }
+  /**
+   * The allowlist is checked against the file's leading bytes, not against the
+   * `Content-Type` the uploader sent — that header is attacker-controlled, so
+   * checking it was checking their own claim. See utils/fileType.
+   */
+  const mimeType = assertDeclaredTypeMatchesBytes(input.mimeType, input.buffer);
 
   // An application may only receive documents from its own applicant, otherwise
   // one partner could attach files to another partner's pending application.
@@ -85,7 +77,7 @@ export const uploadDocumentService = async (input: UploadInput) => {
   }
 
   const storageKey = buildStorageKey(input.ownerUserId, input.fileName);
-  await storage.put(storageKey, input.buffer, input.mimeType);
+  await storage.put(storageKey, input.buffer, mimeType);
 
   try {
     const document = await prisma.document.create({
@@ -94,7 +86,7 @@ export const uploadDocumentService = async (input: UploadInput) => {
         kind: input.kind,
         storageKey,
         fileName: input.fileName.slice(0, 200),
-        mimeType: input.mimeType,
+        mimeType,
         sizeBytes: input.buffer.byteLength,
         ...(input.applicationId ? { applicationId: input.applicationId } : {}),
         ...(input.labOrderId ? { labOrderId: input.labOrderId } : {}),

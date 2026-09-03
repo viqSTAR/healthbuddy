@@ -17,6 +17,8 @@ import {
   colors,
   fetchDoctors,
   fetchMyAppointments,
+  fetchMyFulfilments,
+  rupees,
   radius,
   spacing,
   useAsync,
@@ -33,6 +35,19 @@ const CATEGORIES = [
   { label: 'Cardiology', icon: 'monitor_heart', tint: 'danger' as const, specialty: 'Cardiologist' },
 ];
 
+/**
+ * How long is left, in the roughest useful unit.
+ *
+ * "Expires in 2 days" is what someone needs; a timestamp makes them do the
+ * arithmetic themselves, and this is the one card on the screen with a deadline.
+ */
+const expiresIn = (iso: string) => {
+  const hours = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 3_600_000));
+  if (hours < 1) return 'Expires soon';
+  if (hours < 24) return `${hours}h left`;
+  return `${Math.round(hours / 24)}d left`;
+};
+
 const formatSlot = (appointment: Appointment) => {
   if (!appointment.slot) return 'Scheduled';
   const today = new Date().toISOString().slice(0, 10);
@@ -45,11 +60,17 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { user } = useAuth();
   const doctors = useAsync(() => fetchDoctors(), []);
   const appointments = useAsync(() => fetchMyAppointments(), []);
+  const fulfilments = useAsync(() => fetchMyFulfilments(), []);
 
   const upcoming = appointments.data?.find((a) => a.status === 'SCHEDULED') ?? null;
+
+  /** Baskets still awaiting a decision, soonest to expire first. */
+  const pendingBaskets = (fulfilments.data ?? [])
+    .filter((f) => f.status === 'PENDING_CONSENT')
+    .sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
   const topDoctor = doctors.data?.doctors[0] ?? null;
 
-  const refreshing = doctors.refreshing || appointments.refreshing;
+  const refreshing = doctors.refreshing || appointments.refreshing || fulfilments.refreshing;
   const onRefresh = () => {
     doctors.refresh();
     appointments.refresh();
@@ -100,6 +121,50 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             onPress={() => navigation.navigate('Emergency')}
           />
         </View>
+
+        {/*
+          A prescription waiting to be ordered.
+
+          The doctor prepares a priced basket and the patient has 72 hours to
+          approve it. Until now the only way in was the push notification:
+          dismiss that and the basket was unreachable until it expired, so the
+          doctor had prescribed, the patient had never ordered, and nothing
+          anywhere said why. It is time-limited, so it belongs at the top of the
+          screen rather than in a menu.
+        */}
+        {pendingBaskets.map((basket) => (
+          <Card key={basket.id} style={styles.appointmentCard}>
+            <View style={styles.appointmentHead}>
+              <Text variant="captionSm" weight="medium" color={colors.primary} uppercase>
+                Prescription ready to order
+              </Text>
+              <Badge label={expiresIn(basket.expiresAt)} tint="warning" icon="schedule" />
+            </View>
+
+            <View style={styles.appointmentBody}>
+              <Avatar name={basket.doctorName} size={42} tint="info" />
+              <View style={styles.appointmentText}>
+                <Text variant="headlineSmMobile" color={colors.headingDark} numberOfLines={1}>
+                  {basket.doctorName}
+                </Text>
+                <Text variant="captionSm" color={colors.captionGray} numberOfLines={1}>
+                  {basket.medicines.length} medicine(s)
+                  {basket.labTests.length ? `, ${basket.labTests.length} test(s)` : ''} ·{' '}
+                  {rupees(basket.grandTotal)}
+                </Text>
+              </View>
+            </View>
+
+            <Button
+              label="Review and order"
+              size="md"
+              fullWidth
+              onPress={() =>
+                navigation.navigate('PrescriptionOrder', { fulfilmentId: basket.id })
+              }
+            />
+          </Card>
+        ))}
 
         {upcoming ? (
           <Card style={styles.appointmentCard}>

@@ -3,6 +3,12 @@ import { prisma } from '../config/db.js';
 import { toNum, dec } from '../utils/money.js';
 import { AppError, notFound } from '../utils/AppError.js';
 import { recordAudit } from './auditService.js';
+import {
+  upsertInventoryItemService,
+  removeInventoryItemService,
+} from './inventoryService.js';
+import { recordStockMovementService, setStockService } from './stockService.js';
+import type { StockMovementReason } from '@prisma/client';
 
 /**
  * Everything the admin panel reads and writes, organised by the thing being
@@ -243,7 +249,10 @@ export const getAdminOverviewService = async () => {
  * Patients
  * ------------------------------------------------------------------ */
 
-export const listPatientsService = async (params: Page & { search?: string }) => {
+export const listPatientsService = async (
+  params: Page & { search?: string },
+  viewer?: AuditViewer
+) => {
   const where: Prisma.PatientWhereInput = params.search
     ? {
         OR: [
@@ -274,7 +283,62 @@ export const listPatientsService = async (params: Page & { search?: string }) =>
     }),
   ]);
 
+  /**
+   * Searching is audited; paging is not.
+   *
+   * Browsing the directory is how an operator navigates, and logging every page
+   * turn buries the entries that matter. Typing someone's name or number is a
+   * directed act — that is the read worth being able to account for later.
+   */
+  if (params.search) {
+    await auditPatientRead(viewer, 'patient.searched', 'n/a', {
+      term: params.search.slice(0, 120),
+      matches: total,
+    });
+  }
+
   return { patients: rows, total, page: params.page, limit: params.limit };
+};
+
+/**
+ * Who is doing the looking.
+ *
+ * Passed in rather than read from a module-level context, so that a service
+ * cannot silently record the wrong actor — or, worse, be called from a path
+ * that has no actor and record nothing.
+ */
+export interface AuditViewer {
+  userId: string;
+  ipAddress?: string | null;
+}
+
+/**
+ * Records that somebody opened a patient's file.
+ *
+ * Administrative *writes* were audited from the start; reads were not, which
+ * left the more common and more sensitive action invisible. On a platform
+ * holding health records, "who looked at this person's file, and when" is the
+ * question an investigation actually asks, and it cannot be answered
+ * retrospectively — the log has to already exist.
+ *
+ * Non-throwing, like every other audit call here: a failure to record must not
+ * be a failure to serve, and recordAudit already reports its own failures.
+ */
+const auditPatientRead = async (
+  viewer: AuditViewer | undefined,
+  action: string,
+  entityId: string,
+  metadata?: Prisma.InputJsonValue
+) => {
+  if (!viewer) return;
+  await recordAudit({
+    actorUserId: viewer.userId,
+    action,
+    entityType: 'Patient',
+    entityId,
+    ...(metadata !== undefined ? { metadata } : {}),
+    ipAddress: viewer.ipAddress ?? null,
+  });
 };
 
 /**
@@ -285,7 +349,7 @@ export const listPatientsService = async (params: Page & { search?: string }) =>
  * the patient saw a doctor, and building the screen without those fields is the
  * only reliable way to keep them out of it.
  */
-export const getPatientService = async (id: string) => {
+export const getPatientService = async (id: string, viewer?: AuditViewer) => {
   const patient = await prisma.patient.findUnique({
     where: { id },
     include: {
@@ -302,6 +366,8 @@ export const getPatientService = async (id: string) => {
     },
   });
   if (!patient) throw notFound('Patient');
+
+  await auditPatientRead(viewer, 'patient.record_read', patient.id);
 
   const [appointments, medicineOrders, labOrders, payments, emergencies] = await Promise.all([
     prisma.appointment.findMany({
@@ -452,7 +518,7 @@ export const getDoctorService = async (id: string) => {
   });
   if (!doctor) throw notFound('Doctor');
 
-  const [byStatus, upcomingSlots, recent, earnings, application] = await Promise.all([
+  const [byStatus, upcomingSlots, recent, earnings, application, documents] = await Promise.all([
     prisma.appointment.groupBy({
       by: ['status'],
       where: { doctorId: id },
@@ -488,11 +554,33 @@ export const getDoctorService = async (id: string) => {
       orderBy: { createdAt: 'desc' },
       select: { id: true, status: true, submittedAt: true, reviewedAt: true },
     }),
+    /**
+     * The credentials, by id and kind only.
+     *
+     * A registration certificate is why this person is allowed to prescribe, so
+     * "show me the documents" is the whole of a verification review and it
+     * should not require digging out the original application. The bytes are
+     * fetched per document through the files API, which authorises each one —
+     * listing them here is not a reason to bypass that.
+     */
+    prisma.document.findMany({
+      where: { ownerUserId: doctor.userId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        kind: true,
+        fileName: true,
+        mimeType: true,
+        sizeBytes: true,
+        createdAt: true,
+      },
+    }),
   ]);
 
   return {
     doctor,
     application,
+    documents,
     upcomingSlots,
     appointmentsByStatus: Object.fromEntries(byStatus.map((r) => [r.status, r._count._all])),
     recentAppointments: recent,
@@ -2318,4 +2406,188 @@ export const updateAgentService = async (params: {
   });
 
   return agent;
+};
+
+/* ------------------------------------------------------------------ *
+ * Admin stock control
+ *
+ * A partner manages their own shelf; these exist for the cases where the
+ * platform has to reach into it. A shop that has gone dark mid-order, a
+ * recount after a dispute, a recall that has to be pulled from every pharmacy
+ * at once — none of which the partner can be relied upon to do promptly, and
+ * all of which are somebody's medicine.
+ *
+ * The services underneath are the same ones the partner app calls. Only the
+ * authorisation differs, so the ledger, the reservation arithmetic and the
+ * refusal to stock a Schedule X drug all behave identically no matter who is
+ * driving. What is added here is the audit entry: an admin altering a shop's
+ * stock is exactly the sort of action that has to be attributable afterwards.
+ * ------------------------------------------------------------------ */
+
+const requirePharmacy = async (pharmacyId: string) => {
+  const pharmacy = await prisma.pharmacy.findUnique({
+    where: { id: pharmacyId },
+    select: { id: true, name: true },
+  });
+  if (!pharmacy) throw notFound('Pharmacy');
+  return pharmacy;
+};
+
+export const adminUpsertInventoryService = async (params: {
+  actorUserId: string;
+  pharmacyId: string;
+  medicineId: string;
+  price: number;
+  stock?: number;
+  reorderLevel?: number;
+  isActive?: boolean;
+  batchNumber?: string;
+  expiryDate?: string;
+  ipAddress?: string | null;
+}) => {
+  const pharmacy = await requirePharmacy(params.pharmacyId);
+
+  const item = await upsertInventoryItemService({
+    pharmacyId: params.pharmacyId,
+    medicineId: params.medicineId,
+    price: params.price,
+    ...(params.stock !== undefined ? { stock: params.stock } : {}),
+    ...(params.reorderLevel !== undefined ? { reorderLevel: params.reorderLevel } : {}),
+    ...(params.isActive !== undefined ? { isActive: params.isActive } : {}),
+    ...(params.batchNumber !== undefined ? { batchNumber: params.batchNumber } : {}),
+    ...(params.expiryDate !== undefined ? { expiryDate: params.expiryDate } : {}),
+    actorUserId: params.actorUserId,
+  });
+
+  await recordAudit({
+    actorUserId: params.actorUserId,
+    action: 'pharmacy.inventory_updated_by_admin',
+    entityType: 'Pharmacy',
+    entityId: params.pharmacyId,
+    metadata: {
+      pharmacy: pharmacy.name,
+      medicineId: params.medicineId,
+      price: params.price,
+      ...(params.stock !== undefined ? { openingStock: params.stock } : {}),
+      ...(params.isActive !== undefined ? { isActive: params.isActive } : {}),
+    },
+    ipAddress: params.ipAddress ?? null,
+  });
+
+  return item;
+};
+
+export const adminRecordStockMovementService = async (params: {
+  actorUserId: string;
+  pharmacyId: string;
+  medicineId: string;
+  quantity: number;
+  reason: StockMovementReason;
+  note?: string;
+  batchNumber?: string;
+  expiryDate?: string;
+  ipAddress?: string | null;
+}) => {
+  const pharmacy = await requirePharmacy(params.pharmacyId);
+
+  const movement = await recordStockMovementService({
+    pharmacyId: params.pharmacyId,
+    medicineId: params.medicineId,
+    quantity: params.quantity,
+    reason: params.reason,
+    ...(params.note !== undefined ? { note: params.note } : {}),
+    ...(params.batchNumber !== undefined ? { batchNumber: params.batchNumber } : {}),
+    ...(params.expiryDate !== undefined ? { expiryDate: params.expiryDate } : {}),
+    actorUserId: params.actorUserId,
+  });
+
+  await recordAudit({
+    actorUserId: params.actorUserId,
+    action: 'pharmacy.stock_moved_by_admin',
+    entityType: 'Pharmacy',
+    entityId: params.pharmacyId,
+    metadata: {
+      pharmacy: pharmacy.name,
+      medicineId: params.medicineId,
+      quantity: params.quantity,
+      reason: params.reason,
+      note: params.note ?? null,
+    },
+    ipAddress: params.ipAddress ?? null,
+  });
+
+  return movement;
+};
+
+/**
+ * Delists a line from a shop's catalogue.
+ *
+ * Refuses while stock is reserved against a live order — see
+ * removeInventoryItemService. Delisting a medicine somebody has already paid
+ * for is how an order becomes unfulfillable with no explanation.
+ */
+export const adminRemoveInventoryService = async (params: {
+  actorUserId: string;
+  pharmacyId: string;
+  medicineId: string;
+  ipAddress?: string | null;
+}) => {
+  const pharmacy = await requirePharmacy(params.pharmacyId);
+  const result = await removeInventoryItemService(params.pharmacyId, params.medicineId);
+
+  await recordAudit({
+    actorUserId: params.actorUserId,
+    action: 'pharmacy.inventory_removed_by_admin',
+    entityType: 'Pharmacy',
+    entityId: params.pharmacyId,
+    metadata: { pharmacy: pharmacy.name, medicineId: params.medicineId },
+    ipAddress: params.ipAddress ?? null,
+  });
+
+  return result;
+};
+
+/**
+ * A recount, rather than a movement.
+ *
+ * "There are 180 boxes on the shelf" is a different statement from "25 were
+ * damaged", and the ledger keeps them apart: a recount takes the counted total
+ * and derives the delta, so nobody has to do the arithmetic that produces a
+ * wrong correction. `CORRECTION` is reserved for this path — entering it as a
+ * hand-written movement is refused, because a correction whose size somebody
+ * guessed is exactly the entry an audit cannot trust.
+ */
+export const adminSetStockCountService = async (params: {
+  actorUserId: string;
+  pharmacyId: string;
+  medicineId: string;
+  countedQuantity: number;
+  note?: string;
+  ipAddress?: string | null;
+}) => {
+  const pharmacy = await requirePharmacy(params.pharmacyId);
+
+  const result = await setStockService({
+    pharmacyId: params.pharmacyId,
+    medicineId: params.medicineId,
+    countedQuantity: params.countedQuantity,
+    ...(params.note !== undefined ? { note: params.note } : {}),
+    actorUserId: params.actorUserId,
+  });
+
+  await recordAudit({
+    actorUserId: params.actorUserId,
+    action: 'pharmacy.stock_recounted_by_admin',
+    entityType: 'Pharmacy',
+    entityId: params.pharmacyId,
+    metadata: {
+      pharmacy: pharmacy.name,
+      medicineId: params.medicineId,
+      countedQuantity: params.countedQuantity,
+      delta: result.delta,
+    },
+    ipAddress: params.ipAddress ?? null,
+  });
+
+  return result;
 };

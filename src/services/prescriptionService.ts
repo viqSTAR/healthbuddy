@@ -4,6 +4,7 @@ import { AppError, notFound, conflict } from '../utils/AppError.js';
 import { logger } from '../utils/logger.js';
 import { recordAudit } from './auditService.js';
 import { createFulfilmentForPrescription } from './fulfilmentService.js';
+import { windowFor, type PageRequest } from '../utils/pagination.js';
 
 export interface MedicineLine {
   /** Catalogue reference. Absent for a drug the doctor typed by hand. */
@@ -294,12 +295,16 @@ export const createPrescriptionService = async (params: {
   return prescription;
 };
 
-export const getPatientPrescriptionsService = (patientId: string) =>
-  prisma.prescription.findMany({
+export const getPatientPrescriptionsService = (patientId: string, page?: PageRequest) => {
+  const w = windowFor(page);
+  return prisma.prescription.findMany({
     where: { patientId },
     select: prescriptionView,
     orderBy: { createdAt: 'desc' },
+    take: w.take,
+    skip: w.skip,
   });
+};
 
 /** Readable by the owning patient or the prescribing doctor — nobody else. */
 export const getPrescriptionByIdService = async (

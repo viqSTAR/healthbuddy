@@ -29,6 +29,7 @@ import {
   Text,
   TopBar,
   upsertInventoryItem,
+  removeInventoryItem,
   useAsync,
   type InventoryItem,
   type Medicine,
@@ -362,6 +363,41 @@ const StockSheet: React.FC<{
     }
   };
 
+  /**
+   * Delisting, behind a confirmation.
+   *
+   * Not destructive to the record — the movement history survives — but it does
+   * make the line unbuyable immediately, and a shop that removes the wrong one
+   * loses orders until somebody notices. Worth one tap of friction.
+   */
+  const confirmRemove = () =>
+    Alert.alert(
+      `Remove ${item.medicine.name}?`,
+      item.stock > 0
+        ? `You still have ${item.stock} unit(s) recorded. Removing it takes the listing ` +
+            'off your catalogue; the stock and its history stay on record.'
+        : 'It comes off your catalogue and nobody can order it.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await removeInventoryItem(item.medicineId);
+              onChanged();
+              onClose();
+            } catch (err) {
+              Alert.alert('Could not remove', errorMessage(err));
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ]
+    );
+
   const submitDetails = async () => {
     setBusy(true);
     try {
@@ -608,6 +644,37 @@ const StockSheet: React.FC<{
                 onPress={() => void submitDetails()}
                 loading={busy}
                 fullWidth
+              />
+            </Card>
+
+            {/*
+              Taking a line off the shelf.
+
+              `removeInventoryItem` existed on the client with nothing calling
+              it, so a shop could list a medicine and never stop listing it —
+              the only way off the catalogue was setting stock to zero, which
+              reads to a customer as "out of stock, check back" rather than "we
+              do not carry this".
+
+              Delisting, not deleting: the movement history stays, because it is
+              the shop's own record of what it handled and for how long.
+            */}
+            <SectionHeader title="Stop selling this" />
+            <Card style={styles.form}>
+              <Text variant="captionSm" color={colors.captionGray}>
+                Removes it from your catalogue so nobody can order it. Your movement
+                history is kept, and you can list it again later.
+                {item.stock > 0
+                  ? ` You still have ${item.stock} unit(s) on the shelf.`
+                  : ''}
+              </Text>
+              <Button
+                label="Remove from my catalogue"
+                icon="delete"
+                variant="danger"
+                loading={busy}
+                fullWidth
+                onPress={() => void confirmRemove()}
               />
             </Card>
           </>
